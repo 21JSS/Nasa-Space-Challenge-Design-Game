@@ -32,6 +32,8 @@ public sealed class LaunchDemo : MonoBehaviour
     public float Fuel => fuel;
     public float Altitude => rocketHeight;
     public float Speed { get; private set; }
+    public float WindSpeed => 8.5f + Mathf.Sin(Time.time * 0.18f) * 2.5f;
+    public float WindDirection => Mathf.Repeat(235f + Mathf.Sin(Time.time * 0.07f) * 18f, 360f);
     public float Countdown { get; private set; }
     public float FlightTime => launchElapsed;
     public string Status => status;
@@ -323,6 +325,17 @@ public sealed class LaunchDemo : MonoBehaviour
         Countdown = 5f;
         launchElapsed = rocketHeight = 0f;
         status = "INICIANDO CUENTA REGRESIVA";
+    }
+
+    public void AbortMission()
+    {
+        if (State != FlightState.Countdown && State != FlightState.Flying && State != FlightState.Coasting) return;
+        State = FlightState.Failed;
+        Speed = 0f;
+        Countdown = 0f;
+        status = "MISIÓN ABORTADA POR CONTROL DE TIERRA";
+        SetEngines(false);
+        if (padSmoke != null) padSmoke.Stop(true, ParticleSystemStopBehavior.StopEmitting);
     }
 
     public void ResetDemo()

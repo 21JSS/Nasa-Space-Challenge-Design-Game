@@ -14,9 +14,9 @@ public sealed class LaunchHud : MonoBehaviour
     private static readonly Color Cyan = new Color(0.35f, 0.91f, 0.88f);
     private static readonly Color Orange = new Color(1f, 0.49f, 0.2f);
     private LaunchDemo mission;
-    private TextMeshProUGUI fuelText, altitudeText, speedText, statusText, phaseText, timerText, countdownText, stageText;
+    private TextMeshProUGUI fuelText, altitudeText, speedText, statusText, phaseText, timerText, countdownText, stageText, windSpeedText, windDirectionText, windArrow;
     private UnityEngine.UI.Image fuelFill, flightFill;
-    private UnityEngine.UI.Button fuelButton, launchButton;
+    private UnityEngine.UI.Button fuelButton, launchButton, abortButton;
     private RectTransform canvasRoot;
 
     public void Initialize(LaunchDemo controller)
@@ -68,6 +68,19 @@ public sealed class LaunchHud : MonoBehaviour
         Label(telemetry, "VELOCIDAD VERTICAL", 12, Muted, 20, 129, 210, 20);
         speedText = Label(telemetry, "0.0 <size=14>m/s</size>", 25, Color.white, 20, 151, 210, 34);
 
+        var wind = Panel(canvasRoot, "Wind compass", new Vector2(1f, 1f), new Vector2(-28f, -238f), new Vector2(242f, 132f), Ink);
+        Label(wind, "VIENTO SUPERFICIAL", 13, Cyan, 16, 10, 210, 20);
+        Label(wind, "N", 10, Muted, 62, 31, 16, 16, FontStyles.Bold).alignment = TextAlignmentOptions.Center;
+        Label(wind, "E", 10, Muted, 110, 70, 16, 16, FontStyles.Bold).alignment = TextAlignmentOptions.Center;
+        Label(wind, "S", 10, Muted, 62, 105, 16, 16, FontStyles.Bold).alignment = TextAlignmentOptions.Center;
+        Label(wind, "O", 10, Muted, 14, 70, 16, 16, FontStyles.Bold).alignment = TextAlignmentOptions.Center;
+        windArrow = Label(wind, "▲", 22, Orange, 70, 77, 32, 32, FontStyles.Bold);
+        windArrow.alignment = TextAlignmentOptions.Center;
+        windArrow.rectTransform.anchorMin = windArrow.rectTransform.anchorMax = new Vector2(0f, 1f);
+        windArrow.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        windSpeedText = Label(wind, "0.0 <size=13>m/s</size>", 24, Color.white, 137, 43, 96, 32, FontStyles.Bold);
+        windDirectionText = Label(wind, "HACIA 000°", 12, Muted, 137, 77, 96, 22);
+
         var flight = Panel(canvasRoot, "Flight callout", new Vector2(0.68f, 0.56f), Vector2.zero, new Vector2(420f, 160f), Color.clear);
         countdownText = Label(flight, "", 85, Color.white, 0, 0, 420, 110, FontStyles.Bold);
         countdownText.alignment = TextAlignmentOptions.Center;
@@ -79,6 +92,7 @@ public sealed class LaunchHud : MonoBehaviour
         statusText = Label(bottom, "", 18, Color.white, 22, 45, 1120, 32);
         timerText = Label(bottom, "T − 00:05", 28, Color.white, 1320, 23, 200, 40, FontStyles.Bold);
         timerText.alignment = TextAlignmentOptions.Right;
+        abortButton = Button(bottom, "AbortButton", "ABORTAR", 1155, 22, 140, 46, Orange, Ink, mission.AbortMission);
         var flightTrack = Panel(bottom, "Mission track", new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(1544f, 3f), new Color(0.1f, 0.2f, 0.24f));
         flightFill = Panel(flightTrack, "Progress", new Vector2(0f, 0f), Vector2.zero, new Vector2(0f, 3f), Cyan).GetComponent<UnityEngine.UI.Image>();
     }
@@ -92,6 +106,9 @@ public sealed class LaunchHud : MonoBehaviour
         flightFill.rectTransform.sizeDelta = new Vector2(1544f * Mathf.Clamp01(mission.Altitude / LaunchDemo.TargetAltitude), 3f);
         altitudeText.text = mission.Altitude.ToString("0000") + " <size=17>m</size>";
         speedText.text = mission.Speed.ToString("0.0") + " <size=14>m/s</size>";
+        windSpeedText.text = mission.WindSpeed.ToString("0.0") + " <size=13>m/s</size>";
+        windDirectionText.text = "HACIA " + Mathf.RoundToInt(mission.WindDirection).ToString("000") + "°";
+        windArrow.rectTransform.localEulerAngles = new Vector3(0f, 0f, -mission.WindDirection);
         statusText.text = mission.Status;
         bool preparing = mission.State == LaunchDemo.FlightState.Preparing;
         fuelButton.interactable = preparing && mission.Fuel < 100f;
@@ -99,6 +116,7 @@ public sealed class LaunchHud : MonoBehaviour
         bool counting = mission.State == LaunchDemo.FlightState.Countdown;
         bool complete = mission.State == LaunchDemo.FlightState.Complete;
         bool failed = mission.State == LaunchDemo.FlightState.Failed;
+        abortButton.interactable = counting || mission.State == LaunchDemo.FlightState.Flying || mission.State == LaunchDemo.FlightState.Coasting;
         phaseText.text = preparing ? "01 / PREPARACIÓN" : counting ? "02 / ENCENDIDO" : complete ? "04 / OBJETIVO LOGRADO" : failed ? "VUELO TERMINADO" : "03 / EN VUELO";
         phaseText.fontSize = complete ? 22 : 26;
         countdownText.text = counting ? Mathf.CeilToInt(mission.Countdown).ToString("00") : complete ? "MISIÓN\nCUMPLIDA" : failed ? "INTÉNTALO\nDE NUEVO" : "";
