@@ -19,9 +19,14 @@ public sealed partial class LaunchHud : MonoBehaviour
     TextMeshProUGUI site,phase,status,telemetry,risk,evaluation,budget,flightInfo,log,report,countdown,timer,entryText,bankText;
     UnityEngine.UI.Button material,fuel,shield,crew,autonomy,launch,wait,accept,assist,primary,secondary,tertiary,engineContinue,engineAbort,pause,energy,bankAuto,chuteAuto,camera,audio,numberButton,generate;
     UnityEngine.UI.Button[] profiles;
+    UnityEngine.UI.Button gameMode;
     UnityEngine.UI.Slider entrySlider,bankSlider;
     TMP_InputField seedInput;
     int number=1; Mision lastMission;
+    float nextHudRefresh;
+    Fase displayedPhase;
+    ResultadoMision displayedResult;
+    bool displayedPause,displayedWelcome;
     public void Initialize(LaunchDemo controller)
     {
         view=controller;
@@ -43,6 +48,7 @@ public sealed partial class LaunchHud : MonoBehaviour
         Label(header,"AURORA  /  ARTEMIS",33,Color.white,0,0,700,43,true);
         Label(header,"DISEÑA. EXPLORA. REGRESA A CASA.",12,Cyan,2,46,750,22);
         site=Label(header,"",13,Muted,2,71,1100,24);
+        gameMode=Button(root,"GameMode","",28,108,375,26,()=>view.ChooseGameMode(view.Simulation.EsCasual?ModoJuego.Realista:ModoJuego.Casual),false,12);
         camera=Button(root,"Camera","VISTA / CABINA",1155,28,190,40,()=>view.ToggleCamera());
         audio=Button(root,"Audio","AUDIO: ON",1357,28,215,40,()=>view.ToggleAudio());
         Button(root,"Details","PERFIL Y BITÁCORA",915,28,225,40,()=>details.gameObject.SetActive(!details.gameObject.activeSelf));
@@ -73,6 +79,7 @@ public sealed partial class LaunchHud : MonoBehaviour
         Label(t,"TELEMETRÍA  /  SI",12,Cyan,16,14,240,22);
         telemetry=Label(t,"",16,Color.white,16,48,238,206); telemetry.lineSpacing=8;
         var r=Panel(root,"Design assessment",new Vector2(1,1),new Vector2(-28,-564),new Vector2(270,209),Ink);
+        riskPanel=r;
         Label(r,"PERFIL Y RIESGOS",12,Orange,16,13,238,22);
         risk=Label(r,"",13,Muted,16,43,238,153);
 
@@ -117,6 +124,7 @@ public sealed partial class LaunchHud : MonoBehaviour
         Button(details,"CloseDetails","CERRAR",674,20,118,38,()=>details.gameObject.SetActive(false));
         detailsText=Label(details,"",16,Color.white,28,82,764,560);
         details.gameObject.SetActive(false);
+        BuildRadioHud();
         BuildWelcome(go.transform);
         ShowWelcome(true);
     }
@@ -124,13 +132,21 @@ public sealed partial class LaunchHud : MonoBehaviour
     {
         if(view?.Simulation==null) return;
         var m=view.Simulation; var e=m.Evaluacion; bool prep=m.Fase==Fase.Abordaje && m.Resultado==null, counting=view.State==LaunchDemo.FlightState.Countdown;
+        // Refresh telemetry at 10 Hz, and immediately on phase, pause or mission changes.
+        if(Time.unscaledTime<nextHudRefresh && lastMission==m && displayedPhase==m.Fase && displayedResult==m.Resultado
+            && displayedPause==view.PresentationPaused && displayedWelcome==view.WelcomeVisible) return;
+        nextHudRefresh=Time.unscaledTime+.1f;
+        displayedPhase=m.Fase; displayedResult=m.Resultado; displayedPause=view.PresentationPaused; displayedWelcome=view.WelcomeVisible;
         if(lastMission!=m) { lastMission=m; entrySlider.SetValueWithoutNotify((float)m.AnguloEntrada); bankSlider.SetValueWithoutNotify(0); }
         design.gameObject.SetActive(prep); flight.gameObject.SetActive(!prep && m.Resultado==null); result.gameObject.SetActive(m.Resultado!=null);
         site.text=$"{m.Parametros.Clima.ToUpperInvariant()}   /   LAT {m.Parametros.Latitud:F1}°   ·   INC {m.Parametros.Inclinacion:F1}°   ·   AZ {m.Parametros.Azimut:F1}°   /   ROTACIÓN {DinamicaOrbital.Rotacion(m.Datos,m.Parametros.Inclinacion):F0} m/s";
         status.text=view.Status;
+        Set(gameMode,"MODO: "+(m.EsCasual?"CASUAL · AYUDAS ACTIVAS":"REALISTA")+(prep && !counting?"  › CAMBIAR":""));
+        gameMode.interactable=prep && !counting;
         Set(material,"ESTRUCTURA  ›  "+m.Nave.MaterialId); Set(fuel,"COMBUSTIBLE  ›  "+m.Nave.CombustibleId.Replace('_','/')); Set(shield,"ESCUDO  ›  "+m.Nave.CapaId);
         for(int i=0;i<profiles.Length;i++) { profiles[i].interactable=prep && !counting; profiles[i].targetGraphic.color=e.Perfil?.id==i+1?new Color(.12f,.3f,.34f):Surface; }
         material.interactable=fuel.interactable=shield.interactable=crew.interactable=autonomy.interactable=assist.interactable=prep && !counting;
+        assist.interactable=prep && !counting && !m.EsCasual;
         Set(crew,m.Abordados?"4 ASTRONAUTAS A BORDO":"ABORDAR 4 ASTRONAUTAS");
         Set(autonomy,"AUTONOMÍA: "+m.Parametros.AutonomiaDias+" d  +"); Set(assist,m.Asistencia?"GUÍA: TURISTA":"GUÍA: LABORATORIO");
         evaluation.text=$"M0 {e.MasaCargada/1000:N1} t   ·   Seca {e.MasaSeca/1000:N1} t\nΔv {e.DeltaV:N0} m/s   ·   TWR {e.Twr:F2}   ·   R {e.RelacionMasa:F2}";
@@ -152,18 +168,21 @@ public sealed partial class LaunchHud : MonoBehaviour
             ? $"TRAYECTORIA ACTUAL: {view.VisualFlightAngle:F1}° · HORIZONTE"
             : $"ÁNGULO ENTRADA: {m.AnguloEntrada+m.CorreccionEntrada:F1}°  [−6.5°, −5.5°]";
         bankText.text=$"ALABEO σ: {m.Alabeo:F0}° / "+(m.AutoAlabeo?"AUTOMÁTICO":"MANUAL");
-        entrySlider.interactable=m.Fase==Fase.Recorrido; bankSlider.interactable=m.Fase==Fase.Regreso;
-        bankAuto.interactable=m.Resultado==null && (m.Fase==Fase.Recorrido || m.Fase==Fase.Regreso);
-        chuteAuto.interactable=m.Resultado==null;
+        if(m.EsCasual && m.Fase==Fase.Recorrido) entryText.text="ENTRADA: "+(m.AnguloEntrada+m.CorreccionEntrada).ToString("F1")+"° · AYUDA AL CONFIRMAR";
+        entrySlider.SetValueWithoutNotify((float)m.AnguloEntrada);
+        entrySlider.interactable=m.Fase==Fase.Recorrido && m.Resultado==null; bankSlider.interactable=m.Fase==Fase.Regreso && m.Resultado==null && !m.EsCasual;
+        bankAuto.interactable=m.Resultado==null && !m.EsCasual && (m.Fase==Fase.Recorrido || m.Fase==Fase.Regreso);
+        chuteAuto.interactable=m.Resultado==null && !m.EsCasual;
         if(m.AutoAlabeo) bankSlider.SetValueWithoutNotify((float)m.Alabeo);
-        Set(bankAuto,m.AutoAlabeo?"ALABEO: AUTO":"ALABEO: MANUAL"); Set(chuteAuto,m.AutoParacaidas?"PARACAÍDAS: AUTO":"PARACAÍDAS: MANUAL");
+        Set(bankAuto,m.EsCasual?"ALABEO: ASISTIDO":m.AutoAlabeo?"ALABEO: AUTO":"ALABEO: MANUAL"); Set(chuteAuto,m.EsCasual?"PARACAÍDAS: ASISTIDOS":m.AutoParacaidas?"PARACAÍDAS: AUTO":"PARACAÍDAS: MANUAL");
         energy.interactable=m.Fase==Fase.Recorrido; Set(energy,m.AhorroEnergia?"AHORRO DE ENERGÍA: ACTIVO":"ACTIVAR AHORRO DE ENERGÍA");
         engineContinue.gameObject.SetActive(m.DecisionMotor); engineAbort.gameObject.SetActive(m.DecisionMotor);
-        Set(pause,m.Pausada?"REANUDAR":"PAUSA"); Set(camera,view.CloseCamera?"VISTA / COHETE":"VISTA / CABINA"); Set(audio,view.Muted?"AUDIO: OFF":"AUDIO: ON");
-        timer.text="T+ "+TimeSpan.FromSeconds(m.Tiempo).ToString(@"dd\:hh\:mm\:ss")+$"   /   TIEMPO ×{view.EffectiveTimeRate:N0}   /   "+(m.Pausada?"PAUSADO":m.DecisionMotor || m.ListaTli || m.ListaReentrada?"ESPERANDO DECISIÓN":"SIMULACIÓN");
+        Set(pause,view.PresentationPaused?"REANUDAR":"PAUSA"); Set(camera,view.CloseCamera?"VISTA / COHETE":"VISTA / CABINA"); Set(audio,view.Muted?"AUDIO: OFF":"AUDIO: ON");
+        timer.text="T+ "+TimeSpan.FromSeconds(m.Tiempo).ToString(@"dd\:hh\:mm\:ss")+$"   /   TIEMPO ×{view.EffectiveTimeRate:N0}   /   "+(view.PresentationPaused?"PAUSADO":m.DecisionMotor || m.ListaTli || m.ListaReentrada?"ESPERANDO DECISIÓN":"SIMULACIÓN");
         countdown.text=counting?Mathf.CeilToInt(view.Countdown).ToString("00"):"";
-        if(m.Pausada && !view.WelcomeVisible) status.text="EN PAUSA · Pulsa REANUDAR o P para continuar. Los ajustes siguen disponibles.";
+        if(view.PresentationPaused && !view.WelcomeVisible) status.text="EN PAUSA · Pulsa REANUDAR o P para continuar. Los ajustes siguen disponibles.";
         UpdateWelcome();
+        UpdateRadioHud();
         if(m.Resultado!=null)
         {
             var r=m.Resultado;

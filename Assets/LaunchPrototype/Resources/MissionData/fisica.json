@@ -160,9 +160,9 @@
     "destruccion_q_factor": 1.6,
     "g_tolerancia_numerica": 0.03,
     "asistencia": true,
-    "velocidad_tiempo_ascenso": 8,
+    "velocidad_tiempo_ascenso": 16,
     "velocidad_tiempo_crucero": 7200,
-    "velocidad_tiempo_reingreso": 120,
+    "velocidad_tiempo_reingreso": 8,
     "velocidad_tiempo_descenso": 12,
     "guiado_reentrada": {
       "velocidad_skip_ms": 9000,

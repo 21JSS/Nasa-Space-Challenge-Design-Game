@@ -26,6 +26,7 @@ public sealed partial class LaunchDemo
     public void TogglePause()
     {
         if (!WelcomeVisible && Simulation.Resultado == null) Simulation.Pausar();
+        else if(!WelcomeVisible && Simulation.Fase==Fase.Aterrizaje) recoveryPaused=!recoveryPaused;
     }
 
     void ResetFlightPresentation()
@@ -35,6 +36,8 @@ public sealed partial class LaunchDemo
         returning = false;
         VisualFlightAngle = -6;
         entryVector = null; // The previous line belongs to the destroyed rocket.
+        ResetFlightAtmosphere();
+        ResetRecoveryPresentation();
     }
 
     void UpdateVehiclePose()
@@ -99,13 +102,7 @@ public sealed partial class LaunchDemo
                 end - VisualFlightDirection * .6f + side, end,
                 end - VisualFlightDirection * .6f - side });
         }
-        if (parachutes != null)
-        {
-            // Canopies stay above the cabin while its attitude stabilizes.
-            parachutes.transform.rotation = Quaternion.identity;
-            float size = m.Principales ? 1 : .35f;
-            if (moving) parachutes.transform.localScale = Vector3.MoveTowards(parachutes.transform.localScale, Vector3.one * size, Time.deltaTime * 1.2f);
-        }
+        ApplyRecoveryMotion();
     }
 
     void BuildEntryVector()

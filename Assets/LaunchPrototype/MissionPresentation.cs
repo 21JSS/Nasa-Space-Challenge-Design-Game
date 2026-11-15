@@ -12,9 +12,10 @@ public sealed partial class LaunchDemo
     RepositorioDatos missionData;
     Transform icpsModule, serviceModule, crewCabin, lasTower;
     bool icpsReleased, serviceReleased, lasReleased;
-    GameObject parachutes, moon, reentryGlow, ocean;
+    GameObject parachutes, moon, ocean;
     Renderer earthRenderer;
     Light fillLight;
+    ModoJuego selectedMode = ModoJuego.Realista;
     void InitializeMission()
     {
         missionData=MisionDemoRunner.CargarDatos();
@@ -23,6 +24,7 @@ public sealed partial class LaunchDemo
     void NewMission(int seed,int number)
     {
         Simulation=new Mision(missionData,new GeneradorParametros(missionData).Generar(seed,number));
+        Simulation.ConfigurarModo(selectedMode);
         fuel=100;
         // Telemetría de eventos, útil para verificar el mismo flujo que consume el HUD.
         Simulation.OnEvento+=e=>Debug.Log("[Artemis] "+e);
@@ -33,6 +35,10 @@ public sealed partial class LaunchDemo
         ResetDemo(); NewMission(seed,number);
     }
     public void ToggleCamera() { CloseCamera=!CloseCamera; }
+    public void ChooseGameMode(ModoJuego mode)
+    {
+        if(State==FlightState.Preparing && Simulation.ConfigurarModo(mode)) selectedMode=mode;
+    }
     public void ToggleAudio() { Muted=!Muted; if(engineAudio!=null) engineAudio.mute=Muted; }
     public void ChooseProfile(int index)
     {
@@ -62,6 +68,12 @@ public sealed partial class LaunchDemo
         var m=Simulation;
         string rate=m.Fase==Fase.Recorrido?"velocidad_tiempo_crucero":m.Fase==Fase.Regreso?"velocidad_tiempo_reingreso":m.Fase==Fase.Aterrizaje?"velocidad_tiempo_descenso":"velocidad_tiempo_ascenso";
         EffectiveTimeRate=(float)m.Datos.Juego[rate]*SpeedMultiplier;
+        // Build acceleration after clearing the tower, while preserving the physical solver.
+        if(m.Fase==Fase.Despegue)
+            EffectiveTimeRate=Mathf.Lerp((float)m.Datos.Juego[rate]*.5f,(float)m.Datos.Juego[rate],SmoothRange(0,10000,Altitude))*SpeedMultiplier;
+        // Give parachute inflation and the final approach time to read at normal playback.
+        if(m.Fase==Fase.Aterrizaje)
+            EffectiveTimeRate=Mathf.Min((float)m.Datos.Juego[rate],Mathf.Lerp(1.25f,6f,Mathf.SmoothStep(0,1,Altitude/700f)))*SpeedMultiplier;
         if(!WelcomeVisible && State!=FlightState.Preparing && State!=FlightState.Countdown) m.Avanzar(Mathf.Min(dt,0.1f)*EffectiveTimeRate);
         fuel=(float)m.PropelentePorcentaje; Speed=(float)m.Velocidad; launchElapsed=(float)m.Tiempo;
         // Escala visual comprimida y continua; las magnitudes del HUD siempre conservan SI.
@@ -103,10 +115,9 @@ public sealed partial class LaunchDemo
         var window=Part(crewCabin,"Crew observation window",PrimitiveType.Sphere,Vector3.zero,new Vector3(0.17f,0.11f,0.025f),new Color(0.025f,0.15f,0.24f));
         // El pivote está en unidades de mundo para que accesorios no hereden la escala FBX ×100.
         window.transform.localPosition=new Vector3(0,.06f,-.215f);
-        reentryGlow=Part(crewCabin,"Heat shield plasma",PrimitiveType.Sphere,new Vector3(0,-0.30f,0),new Vector3(0.7f,0.08f,0.7f),new Color(1,0.18f,0.025f),true);
-        reentryGlow.SetActive(false);
         var shield=Part(crewCabin,"Orion heat shield",PrimitiveType.Cylinder,new Vector3(0,-0.32f,0),new Vector3(0.63f,0.045f,0.63f),new Color(0.1f,0.09f,0.09f));
         shield.GetComponent<Renderer>().shadowCastingMode=ShadowCastingMode.On;
+        BuildCapsuleEffects();
     }
     Transform PivotAtBounds(Transform mesh,string name)
     {
@@ -125,28 +136,23 @@ public sealed partial class LaunchDemo
         BuildCelestialBodies();
         fillLight=new GameObject("Earth reflected blue light").AddComponent<Light>(); fillLight.transform.SetParent(transform,false);
         fillLight.type=LightType.Directional; fillLight.color=new Color(0.33f,0.57f,1f); fillLight.intensity=0.65f; fillLight.transform.rotation=Quaternion.Euler(-25,145,0);
-        ocean=Make("Pacific splashdown",PrimitiveType.Plane,new Vector3(0,3.8f,0),new Vector3(80,1,80),new Color(0.02f,0.19f,0.29f)); ocean.SetActive(false);
+        BuildRecoveryEnvironment();
     }
     void UpdateMissionScenery()
     {
         if(Simulation==null) return;
-        bool descent=Simulation.Fase==Fase.Aterrizaje;
-        if(ocean!=null)
-        {
-            ocean.SetActive(descent && !WelcomeVisible);
-            ocean.transform.position=new Vector3(rocket.position.x,4.2f+crewCabin.localPosition.y-.33f,0);
-        }
+        UpdateRecoveryEnvironment();
         if(earthRenderer!=null)
         {
             bool orbit=Simulation.Altura>80000;
             bool entering=Simulation.Fase==Fase.Regreso;
             earthRenderer.gameObject.SetActive(orbit || entering || WelcomeVisible);
-            float approach=entering?1-Mathf.Clamp01(Altitude/120000f):0;
+            float approach=entering?1-SmoothRange(18000,120000,Altitude):0;
             earthRenderer.transform.position=WelcomeVisible
                 ? launchCamera.transform.position+launchCamera.transform.forward*2400+launchCamera.transform.right*750
-                : launchCamera.transform.position+launchCamera.transform.forward*2100-launchCamera.transform.up*(1600-approach*450)
+                : launchCamera.transform.position+launchCamera.transform.forward*Mathf.Lerp(2100,3300,approach)-launchCamera.transform.up*Mathf.Lerp(1600,2200,approach)
                     -launchCamera.transform.right*(entering?Mathf.Clamp(downrange*.015f,0,350):0);
-            earthRenderer.transform.localScale=Vector3.one*(WelcomeVisible?1300:3000);
+            earthRenderer.transform.localScale=Vector3.one*(WelcomeVisible?1300:Mathf.Lerp(3000,5400,approach));
             if(WelcomeVisible || !Simulation.Pausada && Simulation.Resultado==null)
                 earthRenderer.transform.Rotate(Vector3.up,Time.deltaTime*.65f,Space.Self);
         }
@@ -156,28 +162,41 @@ public sealed partial class LaunchDemo
             moon.transform.position=launchCamera.transform.position+launchCamera.transform.forward*1500+launchCamera.transform.right*(WelcomeVisible?630:340)+launchCamera.transform.up*(WelcomeVisible?370:200);
             moon.transform.localScale=Vector3.one*(WelcomeVisible?180:145);
         }
-        if(reentryGlow!=null)
-        {
-            reentryGlow.SetActive(Simulation.Fase==Fase.Regreso && Simulation.Calor>100000);
-            reentryGlow.transform.localScale=new Vector3(0.8f,0.12f+Mathf.PingPong(Time.time*0.4f,0.12f),0.8f);
-        }
+        UpdateCapsuleEffects();
+        UpdateFlightClouds();
         if((Simulation.Drogues || Simulation.Principales) && parachutes==null) BuildParachutes();
     }
     void BuildParachutes()
     {
         parachutes=new GameObject("Orion recovery parachutes"); parachutes.transform.SetParent(crewCabin,false);
         parachutes.transform.localScale=Vector3.one*.02f;
+        BuildRecoveryCanopies();
+    }
+    void BuildRecoveryCanopies()
+    {
+        Mesh canopy=CreateRecoveryCanopyMesh();
+        generatedResources.Add(canopy);
+        recoveryCanopies=new Transform[3]; recoveryCanopyCenters=new Vector3[3];
+        canopyReleasePositions=new Vector3[3]; canopyReleaseRotations=new Quaternion[3];
+        if(recoveryOrangeFabric==null)
+        {
+            recoveryOrangeFabric=new Material(Shader.Find("Universal Render Pipeline/Lit")) { name="Recovery / orange fabric", color=new Color(.98f,.31f,.065f) };
+            recoveryIvoryFabric=new Material(Shader.Find("Universal Render Pipeline/Lit")) { name="Recovery / ivory fabric", color=new Color(.88f,.91f,.88f) };
+            foreach(var mat in new[]{recoveryOrangeFabric,recoveryIvoryFabric}) { mat.SetFloat("_Cull",0); mat.SetFloat("_Smoothness",.22f); generatedResources.Add(mat); }
+            recoveryCord=new Material(Shader.Find("Universal Render Pipeline/Unlit")) { name="Recovery / suspension cords",color=new Color(.72f,.81f,.84f) };
+            recoveryCord.SetFloat("_Cull",0);
+            generatedResources.Add(recoveryCord);
+        }
         for(int i=0;i<3;i++)
         {
             Vector3 center=new Vector3((i-1)*1.5f,3.6f+(i%2)*0.5f,0.1f);
-            Part(parachutes.transform,"Orange recovery canopy",PrimitiveType.Sphere,center,new Vector3(1.75f,0.55f,1.75f),new Color(0.98f,0.34f,0.08f));
-            for(int line=0;line<4;line++)
-            {
-                float a=line*Mathf.PI/2; var end=center+new Vector3(Mathf.Cos(a)*0.7f,-0.15f,Mathf.Sin(a)*0.7f);
-                var rope=new GameObject("Parachute suspension").AddComponent<LineRenderer>(); rope.transform.SetParent(parachutes.transform,false);
-                rope.useWorldSpace=false; rope.positionCount=2; rope.SetPosition(0,Vector3.zero); rope.SetPosition(1,end); rope.startWidth=rope.endWidth=0.012f;
-                var mat=new Material(Shader.Find("Universal Render Pipeline/Unlit")); mat.color=new Color(0.8f,0.86f,0.9f); generatedResources.Add(mat); rope.sharedMaterial=mat;
-            }
+            var dome=new GameObject("Striped recovery canopy "+(i+1),typeof(MeshFilter),typeof(MeshRenderer));
+            dome.transform.SetParent(parachutes.transform,false); dome.transform.localPosition=center;
+            dome.GetComponent<MeshFilter>().sharedMesh=canopy;
+            dome.GetComponent<MeshRenderer>().sharedMaterials=new[]{recoveryOrangeFabric,recoveryIvoryFabric};
+            dome.GetComponent<MeshRenderer>().shadowCastingMode=ShadowCastingMode.Off;
+            recoveryCanopies[i]=dome.transform; recoveryCanopyCenters[i]=center;
         }
+        BuildRecoveryCords();
     }
 }

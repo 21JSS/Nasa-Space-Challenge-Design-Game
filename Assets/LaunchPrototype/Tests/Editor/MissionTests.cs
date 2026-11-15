@@ -75,4 +75,79 @@ public sealed class MissionTests
         Assert.That(m.Resultado,Is.Not.Null); Assert.That(m.Resultado.Tipo,Is.EqualTo(TipoResultado.Exito),m.Resultado.Causa);
         Assert.That(m.SrbSeparado && m.LasSeparado && m.CoreSeparado && m.IcpsSeparado && m.Capsula.ServicioSeparado,Is.True);
     }
+
+    Mision ReturnMission(ModoJuego mode=ModoJuego.Realista,int profile=1)
+    {
+        var m=Mission(); m.ConfigurarModo(mode);
+        var c=d.Combinaciones[profile-1]; m.Seleccionar(c.material,c.combustible,c.capa_termica);
+        m.Abordar(); Assert.That(m.Lanzar(),Is.True);
+        for(int i=0;i<40000 && !m.ListaReentrada && m.Resultado==null;i++)
+        { if(m.ListaTli) m.InyectarTli(); m.Avanzar(m.Paso); }
+        Assert.That(m.ListaReentrada,Is.True,m.Resultado?.Causa);
+        m.SepararServicio(); return m;
+    }
+
+    [TestCase(1,-6.0)]
+    [TestCase(1,-5.5)]
+    [TestCase(4,-5.7078371047973633)]
+    [TestCase(4,-5.9)]
+    public void GuiadoAutomaticoEvitaReboteProlongado(int profile,double angle)
+    {
+        var m=ReturnMission(ModoJuego.Realista,profile); m.AjustarEntrada(angle);
+        Assert.That(m.Reingresar(),Is.True); double start=m.Tiempo;
+        // Before the fix the nominal -6 degree entry climbs to ~948 km and takes >6000 s.
+        while(m.Fase==Fase.Regreso && m.Resultado==null && m.Tiempo-start<1200) m.Avanzar(.2);
+        Assert.That(m.Fase,Is.EqualTo(Fase.Aterrizaje),m.Resultado?.Causa);
+        Assert.That(m.MaxG,Is.LessThanOrEqualTo(4.5));
+        while(m.Resultado==null && m.Tiempo-start<3000) m.Avanzar(.2);
+        Assert.That(m.Resultado?.Tipo,Is.EqualTo(TipoResultado.Exito),m.Resultado?.Causa);
+    }
+
+    [TestCase(-8)] [TestCase(-4)]
+    public void CasualCorrigeEntradaYRecuperaTripulacion(double angle)
+    {
+        var m=ReturnMission(ModoJuego.Casual);
+        m.AjustarEntrada(angle); m.CorregirTrayectoria(1);
+        m.AjustarAlabeo(180); m.AlternarAutoAlabeo(); m.AlternarAutoParacaidas();
+        Assert.That(m.AutoAlabeo && m.AutoParacaidas,Is.True);
+        Assert.That(m.Reingresar(),Is.True);
+        Assert.That(m.AnguloEntrada+m.CorreccionEntrada,Is.InRange(-5.900001,-5.699999));
+        for(int i=0;i<15000 && m.Resultado==null;i++) m.Avanzar(.2);
+        Assert.That(m.Resultado?.Tipo,Is.EqualTo(TipoResultado.Exito),m.Resultado?.Causa);
+    }
+
+    [Test] public void RealistaConservaControlesYRechazaEntradaIncorrecta()
+    {
+        var m=ReturnMission(); Assert.That(m.Modo,Is.EqualTo(ModoJuego.Realista));
+        m.AjustarAlabeo(120); m.AlternarAutoParacaidas();
+        Assert.That(m.AutoAlabeo || m.AutoParacaidas,Is.False);
+        m.AjustarEntrada(-4); Assert.That(m.Reingresar(),Is.False);
+        Assert.That(m.Resultado.Tipo,Is.EqualTo(TipoResultado.PerdidaTotal));
+    }
+
+    [Test] public void ModoQuedaFijoAlLanzarYNoModificaTablasCompartidas()
+    {
+        var m=Mission(); string original=d.Fisica.ToString();
+        m.ConfigurarModo(ModoJuego.Casual); m.ConfigurarAsistencia(false);
+        Assert.That(m.Asistencia,Is.True);
+        m.Abordar(); m.Lanzar(); Assert.That(m.ConfigurarModo(ModoJuego.Realista),Is.False);
+        Assert.That(m.Modo,Is.EqualTo(ModoJuego.Casual));
+        Assert.That(d.Fisica.ToString(),Is.EqualTo(original));
+        var next=Mission(); Assert.That(next.FactorRiesgo,Is.EqualTo(1));
+    }
+
+    [Test] public void CasualReduceFallosSinEliminarRiesgoNiPresupuesto()
+    {
+        double sample=(double)d.Riesgos["p_srb"]*.5;
+        var real=Mission(sample); real.Abordar(); real.Lanzar(); real.Avanzar(.2);
+        Assert.That(real.Resultado?.Tipo,Is.EqualTo(TipoResultado.PerdidaTotal));
+        var casual=Mission(sample); casual.ConfigurarModo(ModoJuego.Casual);
+        casual.Abordar(); casual.Lanzar(); casual.Avanzar(.2);
+        Assert.That(casual.Resultado,Is.Null);
+        var unlucky=Mission(0); unlucky.ConfigurarModo(ModoJuego.Casual);
+        unlucky.Abordar(); unlucky.Lanzar(); unlucky.Avanzar(.2);
+        Assert.That(unlucky.Resultado?.Tipo,Is.EqualTo(TipoResultado.PerdidaTotal));
+        var poor=Mission(); poor.ConfigurarModo(ModoJuego.Casual); poor.Parametros.Presupuesto=3000; poor.Abordar();
+        Assert.That(poor.Lanzar(),Is.False);
+    }
 }

@@ -1,6 +1,8 @@
 {
   "name": "Artemis.Tests",
   "references": ["Artemis.Domain", "Unity.Newtonsoft.Json"],
+  "overrideReferences": true,
+  "precompiledReferences": ["nunit.framework.dll", "Newtonsoft.Json.dll"],
   "includePlatforms": ["Editor"],
   "optionalUnityReferences": ["TestAssemblies"]
 }

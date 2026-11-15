@@ -53,8 +53,10 @@ public sealed partial class LaunchDemo : MonoBehaviour
     private Material fireMaterial, smokeMaterial;
     private Texture2D rocketFinishAlbedo, rocketFinishNormal;
     private Material terrainMaterial, starMaterial;
+    private Transform launchGround;
     private Texture2D terrainAlbedo, terrainNormal, starTexture;
     private LaunchHud hud;
+    public MissionRadio Radio { get; private set; }
 
     private void Start()
     {
@@ -66,6 +68,9 @@ public sealed partial class LaunchDemo : MonoBehaviour
         BuildAtmosphere();
         BuildAudio();
         BuildMissionScenery();
+        BuildFlightClouds();
+        Radio=gameObject.AddComponent<MissionRadio>();
+        Radio.Initialize(this);
         hud = gameObject.AddComponent<LaunchHud>();
         hud.Initialize(this);
         Application.targetFrameRate = 60;
@@ -98,6 +103,8 @@ public sealed partial class LaunchDemo : MonoBehaviour
             }
         }
         AdvanceMission(Time.deltaTime);
+        UpdateFlightPresentationClock();
+        UpdateRecoveryClock();
         UpdateVehiclePose();
         bool firing = State == FlightState.Flying && Simulation.Fase == Artemis.Fase.Despegue && !Simulation.CoreSeparado && Simulation.Resultado == null || (State == FlightState.Countdown && Countdown <= 2f);
         if (enginePlume != null)
@@ -105,6 +112,8 @@ public sealed partial class LaunchDemo : MonoBehaviour
             for (int i = 0; i < enginePlume.Length; i++)
             {
                 ParticleSystem plume = enginePlume[i];
+                var main=plume.main;
+                main.simulationSpeed=WelcomeVisible || Simulation.Pausada || Simulation.DecisionMotor?0:1;
                 if (firing && !plume.isPlaying) plume.Play();
                 else if (!firing && plume.isPlaying) plume.Stop(true, ParticleSystemStopBehavior.StopEmitting);
             }
@@ -132,25 +141,37 @@ public sealed partial class LaunchDemo : MonoBehaviour
         float framing = Mathf.SmoothStep(0f, 1f, rocketHeight / 40f);
         Vector3 target = new Vector3(-1.2f, 7.3f + rocketHeight, 0f);
         Vector3 offset = Vector3.Lerp(new Vector3(11f, 4.8f, -20f), new Vector3(12f, 1.8f, -23f), framing);
-        Vector3 shake = firing ? new Vector3(Mathf.PerlinNoise(Time.time * 17f, 0f) - 0.5f, Mathf.PerlinNoise(0f, Time.time * 19f) - 0.5f, 0f) * 0.055f : Vector3.zero;
+        Vector3 shake = FlightCameraShake(firing);
         if (firstStageSeparated && crewCabin != null) { target = crewCabin.position + Vector3.left * 0.8f; offset = new Vector3(7f, 2.8f, -12f); }
         if (serviceReleased && crewCabin != null) { target = crewCabin.position + Vector3.left * .6f; offset = new Vector3(4.5f, 2.4f, -9f); }
         if (CloseCamera && crewCabin != null) { target=crewCabin.position; offset=new Vector3(3.4f,1.2f,-5.5f); }
+        if (Simulation.Fase == Artemis.Fase.Regreso && crewCabin != null)
+        {
+            float braking=1-SmoothRange(1500,11000,Speed);
+            target=crewCabin.position-VisualFlightDirection*.35f;
+            offset=CloseCamera?new Vector3(2.1f,1f,-4.3f):Vector3.Lerp(new Vector3(3.8f,1.8f,-7.8f),new Vector3(3.2f,1.6f,-6.6f),braking);
+        }
         if (Simulation.Fase == Artemis.Fase.Aterrizaje && !CloseCamera && crewCabin != null)
         {
-            target = crewCabin.position + new Vector3(-.6f,1.6f,0);
-            offset = new Vector3(7f,3f,-16f);
+            float recovered=Mathf.SmoothStep(0,1,Mathf.Clamp01((splashdownAge-1)/7));
+            target = crewCabin.position + Vector3.Lerp(new Vector3(-.25f,1.8f,0),new Vector3(-.18f,.35f,0),recovered);
+            offset = Vector3.Lerp(new Vector3(4.5f,2f,-12f),new Vector3(2.8f,1.6f,-6.8f),recovered);
         }
+        if(Simulation.Fase==Artemis.Fase.Aterrizaje && CloseCamera && crewCabin!=null)
+        { target=crewCabin.position+Vector3.up*.24f; offset=new Vector3(1.7f,1.05f,-3.7f); }
         launchCamera.transform.position = target + offset + shake;
         launchCamera.transform.LookAt(target + shake);
+        float desiredFov=Simulation.Fase==Artemis.Fase.Despegue?Mathf.Lerp(36,44,SmoothRange(50,1700,Speed)):36;
+        if(!PresentationPaused) launchCamera.fieldOfView=Mathf.Lerp(launchCamera.fieldOfView,desiredFov,1-Mathf.Exp(-Time.deltaTime*2));
         float spaceBlend = Mathf.SmoothStep(0f, 1f, Altitude / 100000f);
         launchCamera.backgroundColor = Color.Lerp(new Color(0.12f, 0.23f, 0.32f), new Color(0.002f,0.004f,0.012f), spaceBlend);
         RenderSettings.fogDensity = Mathf.Lerp(0.0012f,0f,spaceBlend);
-        UpdateStarVisibility(Mathf.Lerp(.18f, 1f, Mathf.SmoothStep(0f, 1f, Altitude / 80000f)));
+        UpdateStarVisibility(Simulation.Fase==Artemis.Fase.Aterrizaje?0:SmoothRange(30000,100000,Altitude));
     }
 
     private void BuildWorld()
     {
+        int sceneryStart=transform.childCount;
         RenderSettings.skybox = null;
         RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
         RenderSettings.ambientLight = new Color(0.38f, 0.45f, 0.57f);
@@ -203,6 +224,9 @@ public sealed partial class LaunchDemo : MonoBehaviour
         }
         Make("Fuel tank", PrimitiveType.Cylinder, new Vector3(13f, 1.6f, 10f), new Vector3(2.8f, 1.6f, 2.8f), new Color(0.5f, 0.58f, 0.61f));
         Make("Fuel tank cap", PrimitiveType.Sphere, new Vector3(13f, 3.2f, 10f), new Vector3(2.8f, 0.8f, 2.8f), new Color(0.5f, 0.58f, 0.61f));
+        launchGround=new GameObject("Launch ground scenery").transform;
+        launchGround.SetParent(transform,false);
+        for(int i=transform.childCount-2;i>=sceneryStart;i--) transform.GetChild(i).SetParent(launchGround,true);
         GameObject earth = Make("Earth horizon", PrimitiveType.Sphere, new Vector3(0f, -2500f, 0f), Vector3.one * 5000f, new Color(0.035f, 0.16f, 0.29f));
         Destroy(earth.GetComponent<Collider>());
         BuildStars();
@@ -279,6 +303,9 @@ public sealed partial class LaunchDemo : MonoBehaviour
     private void UpdateStarVisibility(float visibility)
     {
         if (starField == null || starParticles == null) return;
+        bool visible=visibility>.001f;
+        if(starField.gameObject.activeSelf!=visible) starField.gameObject.SetActive(visible);
+        if(!visible) return;
         starField.transform.position = launchCamera.transform.position;
         for (int i = 0; i < starParticles.Length; i++)
         {
@@ -565,7 +592,7 @@ public sealed partial class LaunchDemo : MonoBehaviour
         NewMission(Simulation.Parametros.Semilla, Simulation.Parametros.NumeroMision);
         foreach (Transform piece in separatedStages) if (piece != null) Destroy(piece.gameObject);
         separatedStages.Clear();
-        foreach (Mesh mesh in generatedResources.FindAll(resource => resource is Mesh && resource != celestialSphere).ConvertAll(resource => (Mesh)resource))
+        foreach (Mesh mesh in generatedResources.FindAll(resource => resource is Mesh && resource != celestialSphere && resource != recoveryOceanMesh).ConvertAll(resource => (Mesh)resource))
         {
             generatedResources.Remove(mesh);
             if (mesh != null) Destroy(mesh);
@@ -869,7 +896,7 @@ public sealed partial class LaunchDemo : MonoBehaviour
         shape.enabled = true;
         shape.shapeType = ParticleSystemShapeType.Cone;
         shape.rotation = new Vector3(90f, 0f, 0f);
-        shape.angle = Mathf.Min(coneAngle, 0.35f);
+        shape.angle = coneAngle;
         shape.randomDirectionAmount = 0f;
         shape.sphericalDirectionAmount = 0f;
         shape.radius = 0.12f * sizeScale;
@@ -898,7 +925,11 @@ public sealed partial class LaunchDemo : MonoBehaviour
         renderer.sharedMaterial = fireMaterial;
         renderer.shadowCastingMode = ShadowCastingMode.Off;
         var noise = ps.noise;
-        noise.enabled = false;
+        noise.enabled = true;
+        noise.strength = .12f * sizeScale;
+        noise.frequency = 3f;
+        noise.scrollSpeed = 1.2f;
+        noise.quality = ParticleSystemNoiseQuality.Low;
         return ps;
     }
 

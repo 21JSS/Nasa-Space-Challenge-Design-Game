@@ -6,6 +6,7 @@ using Newtonsoft.Json.Linq;
 namespace Artemis
 {
     public enum Fase { Abordaje, Despegue, Recorrido, Regreso, Aterrizaje }
+    public enum ModoJuego { Realista, Casual }
     public enum TipoResultado { Exito, AbortoSeguro, PerdidaTotal }
     public sealed class ResultadoMision
     {
@@ -40,7 +41,7 @@ namespace Artemis
         public static double Acumulada(double probabilidad,int motores,double segundos) => 1-Math.Pow(1-probabilidad,motores*segundos);
         public void Ascenso(Mision m)
         {
-            double mult=(double)d.Fisica["clima"][m.Parametros.Clima]["riesgo_ascenso"];
+            double mult=(double)d.Fisica["clima"][m.Parametros.Clima]["riesgo_ascenso"]*m.FactorRiesgo;
             if(!srbComprobado)
             {
                 srbComprobado=true;
@@ -66,9 +67,9 @@ namespace Artemis
         }
         public void Recorrido(Mision m)
         {
-            if(m.Nave.CapaId=="Losetas" && Probabilidad((double)d.Riesgos["p_impacto"]))
+            if(m.Nave.CapaId=="Losetas" && Probabilidad((double)d.Riesgos["p_impacto"]*m.FactorRiesgo))
             { m.Capsula.IntegridadEscudo=Math.Max(0,m.Capsula.IntegridadEscudo-(double)d.Riesgos["dano_escudo_impacto"]); m.Emitir("Impacto: escudo térmico dañado. Revisa el margen térmico.",true); }
-            if(m.Parametros.Clima=="Eclipse" && !m.AhorroEnergia && Probabilidad((double)d.Riesgos["p_electrico"]*(double)d.Fisica["clima"]["Eclipse"]["riesgo_electrico"]))
+            if(m.Parametros.Clima=="Eclipse" && !m.AhorroEnergia && Probabilidad((double)d.Riesgos["p_electrico"]*(double)d.Fisica["clima"]["Eclipse"]["riesgo_electrico"]*m.FactorRiesgo))
             { m.FalloElectrico=true; m.Emitir("Anomalía eléctrica: activa ahorro de energía para recuperar sistemas.",true); }
         }
     }
@@ -105,6 +106,9 @@ namespace Artemis
         public bool AutoAlabeo { get; private set; }=true;
         public bool AutoParacaidas { get; private set; }=true;
         public bool Asistencia { get; private set; }
+        public ModoJuego Modo { get; private set; } = ModoJuego.Realista;
+        public bool EsCasual => Modo == ModoJuego.Casual;
+        public double FactorRiesgo => EsCasual ? 0.15 : 1;
         public bool Pausada { get; private set; }
         public bool DecisionMotor { get; private set; }
         public bool Aplazamiento { get; private set; }
@@ -148,7 +152,17 @@ namespace Artemis
         public bool Seleccionar(string material,string combustible,string capa)
         { if(Fase!=Fase.Abordaje || Resultado!=null) return false; Diseno.Seleccionar(material,combustible,capa); Evaluar(); return true; }
         public void ConfigurarAutonomia(double dias) { if(Fase!=Fase.Abordaje) return; Parametros.AutonomiaDias=Matematica.Clamp(dias,(double)Datos.Juego["autonomia_min_dias"],(double)Datos.Juego["autonomia_max_dias"]); Evaluar(); }
-        public void ConfigurarAsistencia(bool enabled) { if(Fase==Fase.Abordaje) Asistencia=enabled; }
+        public bool ConfigurarModo(ModoJuego modo)
+        {
+            if(Fase!=Fase.Abordaje || Resultado!=null || !Enum.IsDefined(typeof(ModoJuego),modo)) return false;
+            if(Modo==modo) return true;
+            Modo=modo;
+            Asistencia=EsCasual || (bool)Datos.Juego["asistencia"];
+            AutoAlabeo=AutoParacaidas=true;
+            Emitir(EsCasual ? "Modo casual · entrada protegida, ayudas automáticas y menor riesgo aleatorio." : "Modo realista · límites y controles originales.");
+            return true;
+        }
+        public void ConfigurarAsistencia(bool enabled) { if(Fase==Fase.Abordaje && !EsCasual) Asistencia=enabled; }
         public void Abordar() { if(Fase!=Fase.Abordaje || Resultado!=null) return; Abordados=true; Emitir("4 astronautas a bordo · autonomía "+Parametros.AutonomiaDias+" días."); }
         public bool PrepararLanzamiento()
         {
@@ -306,14 +320,25 @@ namespace Artemis
         public void AlternarEnergia()
         { if(Fase!=Fase.Recorrido || Resultado!=null) return; AhorroEnergia=!AhorroEnergia; if(AhorroEnergia) FalloElectrico=false; Emitir(AhorroEnergia?"Modo de ahorro: respaldo eléctrico activo.":"Paneles y sistemas en modo normal."); }
         public void AjustarEntrada(double grados) { if(Fase==Fase.Recorrido && Resultado==null) AnguloEntrada=Matematica.Clamp(grados,-8,-4); }
-        public void AjustarAlabeo(double grados) { if(Resultado!=null) return; Alabeo=Matematica.Clamp(grados,0,180); AutoAlabeo=false; }
-        public void AlternarAutoAlabeo() { if(Resultado==null) AutoAlabeo=!AutoAlabeo; }
-        public void AlternarAutoParacaidas() { if(Resultado==null) AutoParacaidas=!AutoParacaidas; }
+        public void AjustarAlabeo(double grados) { if(Resultado!=null || EsCasual) return; Alabeo=Matematica.Clamp(grados,0,180); AutoAlabeo=false; }
+        public void AlternarAutoAlabeo() { if(Resultado==null && !EsCasual) AutoAlabeo=!AutoAlabeo; }
+        public void AlternarAutoParacaidas() { if(Resultado==null && !EsCasual) AutoParacaidas=!AutoParacaidas; }
         public bool Reingresar()
         {
             if(!ListaReentrada || Resultado!=null) return false;
             if(!Capsula.ServicioSeparado) { Emitir("Separa el módulo de servicio antes del reingreso.",true); return false; }
             double gamma=AnguloEntrada+CorreccionEntrada;
+            if(EsCasual)
+            {
+                // Training guidance corrects the prepared corridor, not the flight's physical state.
+                double seguro=Matematica.Clamp(gamma,-5.9,-5.7);
+                if(Math.Abs(seguro-gamma)>1e-6)
+                {
+                    AnguloEntrada=seguro-CorreccionEntrada;
+                    Emitir("Ayuda casual · ángulo de entrada corregido a "+seguro.ToString("F1")+"°.");
+                }
+                gamma=seguro;
+            }
             if(gamma<(double)Datos.Fisica["limites"]["corredor_reingreso_gamma_deg"][0] || gamma>(double)Datos.Fisica["limites"]["corredor_reingreso_gamma_deg"][1])
             { Terminar(TipoResultado.PerdidaTotal,"Entrada fuera del corredor −6.5° a −5.5°."); return false; }
             if(FalloElectrico) { Emitir("Recupera el suministro eléctrico antes del reingreso.",true); return false; }
@@ -336,14 +361,16 @@ namespace Artemis
                 descenso=new DinamicaDescenso(Datos,Masa); EstadoDescenso=new[] {Altura,-Math.Max((double)Datos.Juego["velocidad_descenso_inicial_ms"],Math.Abs(Velocidad*Math.Sin(EstadoReingreso[2])))};
                 Cambiar(Fase.Aterrizaje); Emitir("Descenso · prepara paracaídas de frenado y principales.");
             }
-            else if(Tiempo-inicioReingreso>7200) Terminar(TipoResultado.PerdidaTotal,"Rebote atmosférico: ventana de descenso perdida.");
+            else if(Tiempo-inicioReingreso>7200) Terminar(TipoResultado.PerdidaTotal,
+                "Rebote atmosférico: sin descenso tras 2 h. Reintenta cerca de −5.8° y usa alabeo automático.");
         }
         double AlabeoAutomatico()
         {
             var cfg=Datos.Juego["guiado_reentrada"];
             double h=EstadoReingreso[0], v=Math.Max(1,EstadoReingreso[1]), gamma=EstadoReingreso[2];
-            // Entrada con rebote: sustentación máxima inicialmente; luego controla altura de densidad.
-            if(v>(double)cfg["velocidad_skip_ms"]) return gamma>0 && h>(double)cfg["altura_skip_m"] ? 180 : 0;
+            // Correct an ascending trajectory while air still provides control authority.
+            // Waiting for 60 km lets lift carry the capsule out of the atmosphere first.
+            if(v>(double)cfg["velocidad_skip_ms"]) return gamma>0 ? 180 : 0;
             double r=(double)Datos.Fisica["R_tierra"]+h, g=(double)Datos.Fisica["mu_tierra"]/(r*r);
             var caps=Datos.Fisica["capsula"]; double area=Math.PI*Math.Pow((double)caps["diametro_m"]/2,2), cd=(double)caps["Cd_reingreso"], ld=(double)caps["L_D"];
             double drag=0.5*new Atmosfera(Datos).Evaluar(h).Densidad*v*v*area*cd, lift=drag*ld;

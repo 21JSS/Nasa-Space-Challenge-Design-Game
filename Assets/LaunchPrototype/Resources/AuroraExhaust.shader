@@ -3,6 +3,8 @@ Shader "Aurora/Exhaust"
     Properties
     {
         _Intensity ("Intensity", Float) = 1
+        _EffectTime ("Animation time", Float) = 0
+        _UseEffectTime ("Use controlled animation time", Float) = 0
         [Enum(UnityEngine.Rendering.BlendMode)] _DstBlend ("Destination blend", Float) = 1
     }
     SubShader
@@ -21,6 +23,8 @@ Shader "Aurora/Exhaust"
             struct Varyings { float4 positionCS : SV_POSITION; float4 color : COLOR; float2 uv : TEXCOORD0; };
             CBUFFER_START(UnityPerMaterial)
             float _Intensity;
+            float _EffectTime;
+            float _UseEffectTime;
             float _DstBlend;
             CBUFFER_END
             Varyings vert(Attributes input)
@@ -41,8 +45,9 @@ Shader "Aurora/Exhaust"
             half4 frag(Varyings input) : SV_Target
             {
                 float2 p = input.uv * 2.0 - 1.0;
-                float n = noise(input.uv * 6.0 + float2(0, _Time.y * -1.8));
-                n = n * 0.65 + noise(input.uv * 13.0 + _Time.y * 0.7) * 0.35;
+                float time = lerp(_Time.y, _EffectTime, _UseEffectTime);
+                float n = noise(input.uv * 6.0 + float2(0, time * -1.8));
+                n = n * 0.65 + noise(input.uv * 13.0 + time * 0.7) * 0.35;
                 float edge = saturate((1.0 - dot(p,p)) * 1.6);
                 float alpha = edge * edge * (0.48 + n * 0.52) * input.color.a;
                 return half4(input.color.rgb * _Intensity, alpha);
