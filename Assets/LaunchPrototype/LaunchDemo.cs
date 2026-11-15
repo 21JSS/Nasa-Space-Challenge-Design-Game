@@ -7,19 +7,20 @@ using UnityEngine.InputSystem;
 #endif
 
 /// <summary>Interactive, procedural rocket launch demo. Add this component to a scene root.</summary>
-public sealed class LaunchDemo : MonoBehaviour
+public sealed partial class LaunchDemo : MonoBehaviour
 {
     private static readonly Color Midnight = new Color(0.025f, 0.055f, 0.12f);
     private static readonly Color Cyan = new Color(0.22f, 0.82f, 0.97f);
 
+    private GameObject separatedRocketModel;
     private Transform rocket;
     private Transform upperStage;
     private Transform firstStage;
     private Transform[] boosters = new Transform[2];
-    private ParticleSystem[] firstStageFlames;
-    private ParticleSystem[] upperStageFlames;
-    private ParticleSystem[][] boosterFlames = new ParticleSystem[2][];
     private Light exhaustLight;
+    private ParticleSystem[] enginePlume;
+    private float firstStageNozzleY;
+    private float capsuleNozzleY;
     private Camera launchCamera;
     private float fuel = 0f;
     private float launchElapsed;
@@ -27,33 +28,44 @@ public sealed class LaunchDemo : MonoBehaviour
     private string status = "CARGA COMBUSTIBLE PARA PREPARAR EL DESPEGUE";
     private bool boostersSeparated;
     private bool firstStageSeparated;
+    public float SpeedMultiplier { get; private set; } = 1f;
     public enum FlightState { Preparing, Countdown, Flying, Coasting, Complete, Failed }
     public FlightState State { get; private set; }
     public float Fuel => fuel;
-    public float Altitude => rocketHeight;
+    public float Altitude => Simulation == null ? 0 : (float)Simulation.Altura;
     public float Speed { get; private set; }
-    public float WindSpeed => 8.5f + Mathf.Sin(Time.time * 0.18f) * 2.5f;
+    public float WindSpeed => Simulation == null ? 0 : (float)Artemis.Viento.Evaluar(Simulation.Altura, (double)Simulation.Datos.Fisica["clima"][Simulation.Parametros.Clima]["viento"]);
     public float WindDirection => Mathf.Repeat(235f + Mathf.Sin(Time.time * 0.07f) * 18f, 360f);
     public float Countdown { get; private set; }
-    public float FlightTime => launchElapsed;
-    public string Status => status;
+    public float FlightTime => Simulation == null ? 0 : (float)Simulation.Tiempo;
+    public string Status => State == FlightState.Countdown ? status : Simulation?.Mensaje ?? status;
     public const float TargetAltitude = 600f;
     private readonly List<Transform> separatedStages = new List<Transform>();
     private readonly List<Object> generatedResources = new List<Object>();
     private readonly Dictionary<Color, Material> materials = new Dictionary<Color, Material>();
+    private readonly Dictionary<string, Material> rocketFinishMaterials = new Dictionary<string, Material>();
     private ParticleSystem padSmoke;
+    private ParticleSystem starField;
+    private ParticleSystem.Particle[] starParticles;
+    private Color[] starParticleColors;
+    private float[] starTwinkleOffsets;
     private AudioSource engineAudio;
     private Material fireMaterial, smokeMaterial;
+    private Texture2D rocketFinishAlbedo, rocketFinishNormal;
+    private Material terrainMaterial, starMaterial;
+    private Texture2D terrainAlbedo, terrainNormal, starTexture;
     private LaunchHud hud;
 
     private void Start()
     {
+        InitializeMission();
         BuildWorld();
         BuildRocket();
         BuildCamera();
         BuildLights();
         BuildAtmosphere();
         BuildAudio();
+        BuildMissionScenery();
         hud = gameObject.AddComponent<LaunchHud>();
         hud.Initialize(this);
         Application.targetFrameRate = 60;
@@ -64,76 +76,58 @@ public sealed class LaunchDemo : MonoBehaviour
 #if ENABLE_INPUT_SYSTEM
         if (Keyboard.current != null)
         {
-            if (Keyboard.current.fKey.wasPressedThisFrame) AddFuel();
+            if (UnityEngine.EventSystems.EventSystem.current != null && UnityEngine.EventSystems.EventSystem.current.currentSelectedGameObject != null && UnityEngine.EventSystems.EventSystem.current.currentSelectedGameObject.GetComponent<TMPro.TMP_InputField>() != null) return;
+            if (Keyboard.current.fKey.wasPressedThisFrame) Simulation.Abordar();
             if (Keyboard.current.spaceKey.wasPressedThisFrame) Launch();
             if (Keyboard.current.rKey.wasPressedThisFrame) ResetDemo();
         }
 #endif
+        if (rocket == null || exhaustLight == null) return;
         if (State == FlightState.Countdown)
         {
             Countdown = Mathf.Max(0f, Countdown - Time.deltaTime);
             status = Countdown > 2f ? "SECUENCIA AUTOMÁTICA EN CURSO" : "ENCENDIDO DE MOTORES";
-            if (Countdown <= 2f) SetEngines(true);
             if (Countdown <= 0f)
             {
-                State = FlightState.Flying;
-                status = "DESPEGUE · ASCENSO NOMINAL";
+                State = Simulation.Lanzar() ? FlightState.Flying : FlightState.Preparing;
             }
         }
-        if (State == FlightState.Flying || State == FlightState.Coasting)
-        {
-            launchElapsed += Time.deltaTime;
-            fuel = Mathf.Max(0f, fuel - Time.deltaTime * 3f);
-            if (fuel > 0f) Speed += (3.8f + launchElapsed * 0.38f) * Time.deltaTime;
-            else
-            {
-                State = FlightState.Coasting;
-                Speed = Mathf.Max(0f, Speed - 9.81f * Time.deltaTime);
-                status = "SIN COMBUSTIBLE · ASCENSO POR INERCIA";
-            }
-            rocketHeight += Speed * Time.deltaTime;
-            if (!boostersSeparated && launchElapsed >= 8f) SeparateBoosters();
-            if (!firstStageSeparated && launchElapsed >= 16f) SeparateFirstStage();
-            if (rocketHeight >= TargetAltitude)
-            {
-                State = FlightState.Complete;
-                status = "MISIÓN CUMPLIDA · ALTITUD OBJETIVO ALCANZADA";
-                Speed = 0f;
-            }
-            else if (fuel <= 0f && Speed <= 0f)
-            {
-                State = FlightState.Failed;
-                status = "VUELO TERMINADO · PRUEBA CON MÁS COMBUSTIBLE";
-            }
-            SetEngines(State == FlightState.Flying);
-        }
+        AdvanceMission(Time.deltaTime);
         rocket.position = new Vector3(0f, 4.2f + rocketHeight, 0f);
-        bool firing = State == FlightState.Flying || (State == FlightState.Countdown && Countdown <= 2f);
-        exhaustLight.transform.localPosition = firstStageSeparated ? new Vector3(0f, 0.55f, 0f) : new Vector3(0f, -3.05f, 0f);
+        bool firing = State == FlightState.Flying && Simulation.Fase == Artemis.Fase.Despegue && !Simulation.CoreSeparado && Simulation.Resultado == null || (State == FlightState.Countdown && Countdown <= 2f);
+        if (enginePlume != null)
+        {
+            for (int i = 0; i < enginePlume.Length; i++)
+            {
+                ParticleSystem plume = enginePlume[i];
+                if (firing && !plume.isPlaying) plume.Play();
+                else if (!firing && plume.isPlaying) plume.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+            }
+        }
+        exhaustLight.transform.localPosition = new Vector3(0f, firstStageSeparated ? capsuleNozzleY : firstStageNozzleY, 0f);
         exhaustLight.intensity = firing ? 14f + Mathf.PerlinNoise(Time.time * 21f, 0f) * 10f : 0f;
         if (firing && rocketHeight < 14f) { if (!padSmoke.isPlaying) padSmoke.Play(); }
         else if (padSmoke.isPlaying) padSmoke.Stop(true, ParticleSystemStopBehavior.StopEmitting);
         engineAudio.volume = Mathf.MoveTowards(engineAudio.volume, firing ? 0.35f : 0f, Time.deltaTime * 0.5f);
-        engineAudio.pitch = 0.85f + Mathf.Clamp01(Speed / 90f) * 0.3f;
+        engineAudio.pitch = 0.85f + Mathf.Clamp01(Speed / 20f) * 0.3f;
         UpdateCamera(firing);
-    }
-
-    private void SetEngines(bool on)
-    {
-        SetFlames(firstStageFlames, on && !firstStageSeparated);
-        SetFlames(upperStageFlames, on && firstStageSeparated);
-        foreach (var plume in boosterFlames) SetFlames(plume, on && !boostersSeparated);
+        UpdateMissionScenery();
     }
 
     private void UpdateCamera(bool firing)
     {
         float framing = Mathf.SmoothStep(0f, 1f, rocketHeight / 40f);
-        Vector3 target = new Vector3(-2.5f, 4.4f + rocketHeight, 0f);
+        Vector3 target = new Vector3(-1.2f, 7.3f + rocketHeight, 0f);
         Vector3 offset = Vector3.Lerp(new Vector3(11f, 4.8f, -20f), new Vector3(12f, 1.8f, -23f), framing);
         Vector3 shake = firing ? new Vector3(Mathf.PerlinNoise(Time.time * 17f, 0f) - 0.5f, Mathf.PerlinNoise(0f, Time.time * 19f) - 0.5f, 0f) * 0.055f : Vector3.zero;
+        if (firstStageSeparated && crewCabin != null) { target = crewCabin.position + Vector3.left * 0.8f; offset = new Vector3(7f, 2.8f, -12f); }
+        if (CloseCamera && crewCabin != null) { target=crewCabin.position; offset=new Vector3(3.4f,1.2f,-5.5f); }
         launchCamera.transform.position = target + offset + shake;
         launchCamera.transform.LookAt(target + shake);
-        launchCamera.backgroundColor = Color.Lerp(new Color(0.12f, 0.23f, 0.32f), Midnight, rocketHeight / TargetAltitude);
+        float spaceBlend = Mathf.SmoothStep(0f, 1f, Altitude / 100000f);
+        launchCamera.backgroundColor = Color.Lerp(new Color(0.12f, 0.23f, 0.32f), new Color(0.002f,0.004f,0.012f), spaceBlend);
+        RenderSettings.fogDensity = Mathf.Lerp(0.0012f,0f,spaceBlend);
+        UpdateStarVisibility(Mathf.SmoothStep(0f, 1f, (Altitude-18000f) / 82000f));
     }
 
     private void BuildWorld()
@@ -143,9 +137,10 @@ public sealed class LaunchDemo : MonoBehaviour
         RenderSettings.ambientLight = new Color(0.38f, 0.45f, 0.57f);
         RenderSettings.fog = true;
         RenderSettings.fogColor = new Color(0.12f, 0.23f, 0.32f);
-        RenderSettings.fogDensity = 0.007f;
+        RenderSettings.fogDensity = 0.0012f;
 
-        Make("Launch Site", PrimitiveType.Plane, new Vector3(0f, -0.15f, 0f), new Vector3(15f, 1f, 15f), new Color(0.22f, 0.29f, 0.36f));
+        GameObject launchSite = Make("Launch Site", PrimitiveType.Plane, new Vector3(0f, -0.15f, 0f), new Vector3(15f, 1f, 15f), new Color(0.22f, 0.29f, 0.36f));
+        ApplyLandingTerrainFinish(launchSite);
         Make("Reinforced launch deck", PrimitiveType.Cube, new Vector3(0f, 0.15f, 0f), new Vector3(7.5f, 0.45f, 7.5f), new Color(0.16f, 0.21f, 0.27f));
         Make("Deck inset", PrimitiveType.Cylinder, new Vector3(0f, 0.4f, 0f), new Vector3(3.1f, 0.12f, 3.1f), new Color(0.36f, 0.43f, 0.49f));
 
@@ -189,6 +184,120 @@ public sealed class LaunchDemo : MonoBehaviour
         }
         Make("Fuel tank", PrimitiveType.Cylinder, new Vector3(13f, 1.6f, 10f), new Vector3(2.8f, 1.6f, 2.8f), new Color(0.5f, 0.58f, 0.61f));
         Make("Fuel tank cap", PrimitiveType.Sphere, new Vector3(13f, 3.2f, 10f), new Vector3(2.8f, 0.8f, 2.8f), new Color(0.5f, 0.58f, 0.61f));
+        GameObject earth = Make("Earth horizon", PrimitiveType.Sphere, new Vector3(0f, -2500f, 0f), Vector3.one * 5000f, new Color(0.035f, 0.16f, 0.29f));
+        Destroy(earth.GetComponent<Collider>());
+        BuildStars();
+    }
+
+    private void BuildStars()
+    {
+        const int count = 2200;
+        var random = new System.Random(2026);
+        Color[] palette = { new Color(0.72f, 0.84f, 1f), new Color(0.48f, 0.68f, 1f), new Color(1f, 0.86f, 0.68f), Color.white };
+        var starObject = new GameObject("High altitude star field");
+        starObject.transform.SetParent(transform, false);
+        starField = starObject.AddComponent<ParticleSystem>();
+        starField.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        var main = starField.main;
+        main.loop = true;
+        main.playOnAwake = false;
+        main.duration = 100000f;
+        main.simulationSpace = ParticleSystemSimulationSpace.Local;
+        main.startSpeed = 0f;
+        main.startLifetime = 100000f;
+        main.maxParticles = count;
+        var emission = starField.emission;
+        emission.enabled = false;
+        var shape = starField.shape;
+        shape.enabled = false;
+        var renderer = starField.GetComponent<ParticleSystemRenderer>();
+        renderer.renderMode = ParticleSystemRenderMode.Billboard;
+        renderer.alignment = ParticleSystemRenderSpace.View;
+        renderer.shadowCastingMode = ShadowCastingMode.Off;
+        renderer.receiveShadows = false;
+        Shader starShader = Resources.Load<Shader>("AuroraStars");
+        if (starShader == null) starShader = Shader.Find("Aurora/Stars");
+        if (starShader == null)
+        {
+            Debug.LogError("Could not load the Aurora/Stars shader.", this);
+            return;
+        }
+        starMaterial = new Material(starShader) { name = "Distant stars" };
+        starTexture = CreateStarTexture();
+        starMaterial.SetTexture("_MainTex", starTexture);
+        renderer.sharedMaterial = starMaterial;
+        generatedResources.Add(starMaterial);
+        generatedResources.Add(starTexture);
+
+        starParticles = new ParticleSystem.Particle[count];
+        starParticleColors = new Color[count];
+        starTwinkleOffsets = new float[count];
+        for (int i = 0; i < count; i++)
+        {
+            float angle = (float)random.NextDouble() * Mathf.PI * 2f;
+            float elevation = Mathf.Asin(Mathf.Lerp(-1f, 1f, (float)random.NextDouble()));
+            float distance = Mathf.Lerp(2400f, 3200f, (float)random.NextDouble());
+            float horizontalDistance = Mathf.Cos(elevation) * distance;
+            Vector3 position = new Vector3(Mathf.Sin(angle) * horizontalDistance, Mathf.Sin(elevation) * distance, Mathf.Cos(angle) * horizontalDistance);
+            float size = Mathf.Lerp(1.3f, 4.2f, (float)random.NextDouble());
+            Color color = palette[random.Next(palette.Length)];
+            starParticleColors[i] = color;
+            starTwinkleOffsets[i] = (float)random.NextDouble() * Mathf.PI * 2f;
+            starParticles[i] = new ParticleSystem.Particle
+            {
+                position = position,
+                startColor = Color.clear,
+                startSize = size,
+                startLifetime = 100000f,
+                remainingLifetime = 100000f,
+                velocity = Vector3.zero
+            };
+        }
+        starField.SetParticles(starParticles, starParticles.Length);
+        starField.Play();
+    }
+
+    private void UpdateStarVisibility(float visibility)
+    {
+        if (starField == null || starParticles == null) return;
+        starField.transform.position = launchCamera.transform.position;
+        for (int i = 0; i < starParticles.Length; i++)
+        {
+            float twinkle = 0.8f + Mathf.Sin(Time.time * (0.7f + (i % 7) * 0.11f) + starTwinkleOffsets[i]) * 0.2f;
+            Color color = starParticleColors[i];
+            color.a = visibility * twinkle;
+            starParticles[i].startColor = color;
+        }
+        starField.SetParticles(starParticles, starParticles.Length);
+    }
+
+    private Texture2D CreateStarTexture()
+    {
+        const int resolution = 32;
+        var texture = new Texture2D(resolution, resolution, TextureFormat.RGBA32, true, true)
+        {
+            name = "Four point star glow",
+            wrapMode = TextureWrapMode.Clamp,
+            filterMode = FilterMode.Bilinear
+        };
+        var pixels = new Color[resolution * resolution];
+        for (int y = 0; y < resolution; y++)
+        {
+            for (int x = 0; x < resolution; x++)
+            {
+                float dx = Mathf.Abs((x + 0.5f) / resolution * 2f - 1f);
+                float dy = Mathf.Abs((y + 0.5f) / resolution * 2f - 1f);
+                float radius = Mathf.Sqrt(dx * dx + dy * dy);
+                float core = Mathf.Exp(-radius * radius * 18f);
+                float rays = Mathf.Max(Mathf.Pow(Mathf.Clamp01(1f - dx), 18f) * Mathf.Clamp01(1f - dy * 7f),
+                    Mathf.Pow(Mathf.Clamp01(1f - dy), 18f) * Mathf.Clamp01(1f - dx * 7f));
+                float alpha = Mathf.Clamp01(core * 0.65f + rays * 0.85f);
+                pixels[y * resolution + x] = new Color(1f, 1f, 1f, alpha);
+            }
+        }
+        texture.SetPixels(pixels);
+        texture.Apply(true, true);
+        return texture;
     }
 
     private void BuildRocket()
@@ -196,62 +305,137 @@ public sealed class LaunchDemo : MonoBehaviour
         rocket = new GameObject("AURORA  •  launch vehicle").transform;
         rocket.SetParent(transform, false);
         rocket.position = new Vector3(0f, 4.2f, 0f);
-
-        firstStage = new GameObject("Core first stage").transform;
-        firstStage.SetParent(rocket, false);
-        firstStage.localPosition = new Vector3(0f, -0.95f, 0f);
-        Part(firstStage, "LOX / RP-1 core tank", PrimitiveType.Cylinder, new Vector3(0f, -0.15f, 0f), new Vector3(1.05f, 1.3f, 1.05f), new Color(0.83f, 0.88f, 0.91f));
-        Part(firstStage, "Interstage collar", PrimitiveType.Cylinder, new Vector3(0f, 1.05f, 0f), new Vector3(1.06f, 0.16f, 1.06f), new Color(0.22f, 0.29f, 0.35f));
-        Part(firstStage, "Tank band", PrimitiveType.Cylinder, new Vector3(0f, 0.7f, 0f), new Vector3(1.055f, 0.055f, 1.055f), Cyan);
-        for (int i = 0; i < 4; i++)
+        separatedRocketModel = LoadSeparatedRocketModel();
+        if (separatedRocketModel == null)
         {
-            float a = i * Mathf.PI * 0.5f;
-            Part(firstStage, "Engine bell", PrimitiveType.Cylinder, new Vector3(Mathf.Cos(a) * 0.38f, -1.48f, Mathf.Sin(a) * 0.38f), new Vector3(0.2f, 0.28f, 0.2f), new Color(0.22f, 0.27f, 0.32f));
+            status = "NO SE ENCONTRÓ EL MODELO SEPARADO DEL COHETE";
+            Debug.LogError("Could not load Assets/Resources/Modelado Cohete Separado.fbx.", this);
+            return;
         }
-        for (int i = 0; i < 3; i++)
+        if (!BuildSeparatedModelStages())
         {
-            float a = i * Mathf.PI * 2f / 3f;
-            GameObject fin = Part(firstStage, "Titanium grid fin", PrimitiveType.Cube,
-                new Vector3(Mathf.Cos(a) * 0.57f, -0.92f, Mathf.Sin(a) * 0.57f), new Vector3(0.12f, 0.76f, 0.58f), new Color(0.19f, 0.3f, 0.39f));
-            fin.transform.localRotation = Quaternion.Euler(0f, -a * Mathf.Rad2Deg, -8f);
+            status = "NO SE PUDIERON ENSAMBLAR LAS ETAPAS DEL MODELO";
+            return;
         }
+        CreateRocketEngineLight();
+    }
 
-        upperStage = new GameObject("Second stage and payload fairing").transform;
-        upperStage.SetParent(rocket, false);
-        upperStage.localPosition = new Vector3(0f, 0.95f, 0f);
-        Part(upperStage, "Second stage tank", PrimitiveType.Cylinder, new Vector3(0f, 0.42f, 0f), new Vector3(0.88f, 1.05f, 0.88f), new Color(0.84f, 0.89f, 0.92f));
-        Part(upperStage, "Stage separation ring", PrimitiveType.Cylinder, new Vector3(0f, -0.65f, 0f), new Vector3(0.92f, 0.12f, 0.92f), new Color(0.18f, 0.28f, 0.36f));
-        Part(upperStage, "Payload fairing", PrimitiveType.Cylinder, new Vector3(0f, 1.38f, 0f), new Vector3(0.9f, 0.56f, 0.9f), new Color(0.88f, 0.92f, 0.95f));
-        ConePart(upperStage, "Payload fairing nose", new Vector3(0f, 2.45f, 0f), 0.45f, 1.02f, new Color(0.82f, 0.88f, 0.92f));
-        Part(upperStage, "Nose cap", PrimitiveType.Sphere, new Vector3(0f, 2.96f, 0f), new Vector3(0.08f, 0.08f, 0.08f), Cyan, true);
-        Part(upperStage, "Telemetry band", PrimitiveType.Cylinder, new Vector3(0f, 0.79f, 0f), new Vector3(0.89f, 0.08f, 0.89f), Cyan);
-        Part(upperStage, "Cabin window", PrimitiveType.Sphere, new Vector3(0f, 1.35f, -0.43f), new Vector3(0.28f, 0.28f, 0.08f), new Color(0.03f, 0.12f, 0.2f), true);
-        upperStageFlames = CreateEnginePlume(upperStage, "Vacuum engine plume", new Vector3(0f, -0.85f, 0f), 0.72f);
-
-        for (int i = 0; i < boosters.Length; i++)
-        {
-            float side = i == 0 ? -1f : 1f;
-            Transform booster = new GameObject(i == 0 ? "Left solid rocket booster" : "Right solid rocket booster").transform;
-            booster.SetParent(rocket, false);
-            booster.localPosition = new Vector3(side * 1.08f, -0.6f, 0f);
-            boosters[i] = booster;
-            Part(booster, "Booster casing", PrimitiveType.Cylinder, Vector3.zero, new Vector3(0.38f, 1.25f, 0.38f), new Color(0.78f, 0.83f, 0.87f));
-            Part(booster, "Booster nose", PrimitiveType.Sphere, new Vector3(0f, 1.25f, 0f), new Vector3(0.38f, 0.36f, 0.38f), new Color(0.16f, 0.45f, 0.65f));
-            Part(booster, "Booster nozzle", PrimitiveType.Cylinder, new Vector3(0f, -1.32f, 0f), new Vector3(0.24f, 0.18f, 0.24f), new Color(0.2f, 0.25f, 0.3f));
-            Part(booster, "Booster stripe", PrimitiveType.Cylinder, new Vector3(0f, -0.35f, 0f), new Vector3(0.39f, 0.07f, 0.39f), Cyan);
-            boosterFlames[i] = CreateEnginePlume(booster, "Solid booster plume", new Vector3(0f, -1.48f, 0f), 0.46f);
-            SetFlames(boosterFlames[i], false);
-        }
-
-        firstStageFlames = CreateEnginePlume(firstStage, "Core engine plume", new Vector3(0f, -1.7f, 0f), 1f);
-        SetFlames(firstStageFlames, false);
-        SetFlames(upperStageFlames, false);
+    private void CreateRocketEngineLight()
+    {
+        Vector3 enginePosition = new Vector3(0f, firstStageNozzleY, 0f);
+        enginePlume = CreateEnginePlume(rocket, "Rocket main engine", enginePosition, 0.7f);
         exhaustLight = new GameObject("Flickering engine light").AddComponent<Light>();
         exhaustLight.type = LightType.Point;
         exhaustLight.color = new Color(1f, 0.38f, 0.11f);
         exhaustLight.range = 12f;
         exhaustLight.intensity = 0f;
         exhaustLight.transform.SetParent(rocket, false);
+        exhaustLight.transform.localPosition = enginePosition;
+    }
+
+    private bool BuildSeparatedModelStages()
+    {
+        Transform modelRoot = Instantiate(separatedRocketModel, rocket, false).transform;
+        modelRoot.name = "Separated rocket model";
+        foreach (Camera importedCamera in modelRoot.GetComponentsInChildren<Camera>(true)) importedCamera.enabled = false;
+        foreach (Light importedLight in modelRoot.GetComponentsInChildren<Light>(true)) importedLight.enabled = false;
+        foreach (Transform child in modelRoot.GetComponentsInChildren<Transform>(true))
+            if (child.name == "Cube") child.gameObject.SetActive(false);
+
+        Transform body = FindModelPart(modelRoot, "Modelo 1");
+        Transform leftBooster = FindModelPart(modelRoot, "Modelo 2");
+        Transform rightBooster = FindModelPart(modelRoot, "Modelo 3");
+        Transform capsule = FindModelPart(modelRoot, "Modelo 4");
+        if (body == null || leftBooster == null || rightBooster == null || capsule == null)
+        {
+            var parts = new List<Transform>();
+            foreach (MeshFilter filter in modelRoot.GetComponentsInChildren<MeshFilter>(true))
+                if (filter.gameObject.activeInHierarchy && filter.name != "Cube" && !parts.Contains(filter.transform)) parts.Add(filter.transform);
+            if (parts.Count < 4)
+            {
+                Debug.LogError("The separated rocket FBX must contain four separate mesh objects.", this);
+                Destroy(modelRoot.gameObject);
+                return false;
+            }
+            parts.Sort((a, b) => PartHeight(b).CompareTo(PartHeight(a)));
+            body = parts[0]; leftBooster = parts[1]; rightBooster = parts[2]; capsule = parts[3];
+        }
+
+        if (!TryGetPartBounds(body, out Bounds bodyBounds) || !TryGetPartBounds(capsule, out Bounds capsuleBounds) ||
+            !TryGetPartBounds(leftBooster, out Bounds leftBounds) || !TryGetPartBounds(rightBooster, out Bounds rightBounds))
+        {
+            Debug.LogError("Could not read the separate rocket stages from the FBX.", this);
+            Destroy(modelRoot.gameObject);
+            return false;
+        }
+
+        float bodyHeight = bodyBounds.size.y;
+        float capsuleHeight = capsuleBounds.size.y;
+        float boosterHeight = Mathf.Max(leftBounds.size.y, rightBounds.size.y);
+        float bodyWidth = bodyBounds.size.x;
+        float boosterWidth = Mathf.Max(leftBounds.size.x, rightBounds.size.x);
+        MovePartCenter(modelRoot, body, new Vector3(0f, bodyHeight * 0.5f, 0f));
+        MovePartCenter(modelRoot, capsule, new Vector3(0f, bodyHeight + capsuleHeight * 0.5f + 0.08f, 0f));
+        MovePartCenter(modelRoot, leftBooster, new Vector3(-(bodyWidth + boosterWidth) * 0.5f - 0.12f, boosterHeight * 0.5f, 0f));
+        MovePartCenter(modelRoot, rightBooster, new Vector3((bodyWidth + boosterWidth) * 0.5f + 0.12f, boosterHeight * 0.5f, 0f));
+        float modelScale = 6f / Mathf.Max(bodyHeight + capsuleHeight + 0.08f, 0.01f);
+        modelRoot.localScale = Vector3.one * modelScale;
+
+        firstStageNozzleY = 0.02f * modelScale;
+        capsuleNozzleY = (bodyHeight + 0.08f) * modelScale;
+        ApplyRealisticRocketFinish(body, "Primary stage", new Color(0.55f, 0.67f, 0.76f), 0.78f, 0.76f);
+        ApplyRealisticRocketFinish(leftBooster, "Booster", new Color(0.26f, 0.40f, 0.53f), 0.84f, 0.72f);
+        ApplyRealisticRocketFinish(rightBooster, "Booster", new Color(0.26f, 0.40f, 0.53f), 0.84f, 0.72f);
+        ApplyRealisticRocketFinish(capsule, "Crew capsule", new Color(0.78f, 0.84f, 0.89f), 0.68f, 0.82f);
+
+        firstStage = body;
+        upperStage = capsule;
+        BuildUpperModules(capsule);
+        boosters[0] = leftBooster;
+        boosters[1] = rightBooster;
+        boostersSeparated = false;
+        return true;
+    }
+
+    private static GameObject LoadSeparatedRocketModel()
+    {
+        GameObject bestModel = null;
+        int bestPartCount = 0;
+        foreach (GameObject candidate in Resources.LoadAll<GameObject>("Modelado Cohete Separado"))
+        {
+            int partCount = candidate.GetComponentsInChildren<MeshFilter>(true).Length;
+            if (partCount <= bestPartCount) continue;
+            bestModel = candidate;
+            bestPartCount = partCount;
+        }
+        return bestModel;
+    }
+
+    private static Transform FindModelPart(Transform root, string token)
+    {
+        string search = token.ToLowerInvariant();
+        foreach (MeshFilter filter in root.GetComponentsInChildren<MeshFilter>(true))
+            if (filter.name.ToLowerInvariant().Contains(search)) return filter.transform;
+        return null;
+    }
+
+    private static bool TryGetPartBounds(Transform part, out Bounds bounds)
+    {
+        Renderer[] renderers = part.GetComponentsInChildren<Renderer>(true);
+        if (renderers.Length == 0) { bounds = default; return false; }
+        bounds = renderers[0].bounds;
+        for (int i = 1; i < renderers.Length; i++) bounds.Encapsulate(renderers[i].bounds);
+        return bounds.size.sqrMagnitude > 0.0001f;
+    }
+
+    private float PartHeight(Transform part) => TryGetPartBounds(part, out Bounds bounds) ? bounds.size.y : 0f;
+
+    private static void MovePartCenter(Transform modelRoot, Transform part, Vector3 targetCenter)
+    {
+        if (!TryGetPartBounds(part, out Bounds bounds) || part.parent == null) return;
+        Vector3 targetWorld = modelRoot.TransformPoint(targetCenter);
+        Vector3 worldDelta = targetWorld - bounds.center;
+        part.localPosition += part.parent.InverseTransformVector(worldDelta);
     }
 
     private void BuildCamera()
@@ -261,7 +445,7 @@ public sealed class LaunchDemo : MonoBehaviour
         go.tag = "MainCamera";
         launchCamera = go.AddComponent<Camera>();
         launchCamera.fieldOfView = 36f;
-        launchCamera.farClipPlane = 1500f;
+        launchCamera.farClipPlane = 8000f;
         launchCamera.allowHDR = true;
         go.AddComponent<UniversalAdditionalCameraData>().renderPostProcessing = true;
         launchCamera.backgroundColor = Midnight;
@@ -290,10 +474,9 @@ public sealed class LaunchDemo : MonoBehaviour
         for (int i = 0; i < boosters.Length; i++)
         {
             Transform part = boosters[i];
-            SetFlames(boosterFlames[i], false);
             part.SetParent(transform, true);
             separatedStages.Add(part);
-            part.gameObject.AddComponent<FallingStage>().Initialize(new Vector3(i == 0 ? -2.2f : 2.2f, 1.1f, i == 0 ? -0.8f : 0.8f), new Vector3(0f, 0f, i == 0 ? -18f : 18f));
+            part.gameObject.AddComponent<FallingStage>().Initialize(new Vector3(i == 0 ? -2.2f : 2.2f, 1.1f, i == 0 ? -0.8f : 0.8f), new Vector3(0f, 0f, i == 0 ? -18f : 18f), this);
         }
         status = "PROPULSORES LATERALES SEPARADOS";
     }
@@ -301,13 +484,21 @@ public sealed class LaunchDemo : MonoBehaviour
     private void SeparateFirstStage()
     {
         firstStageSeparated = true;
+        Vector3 capsuleEnginePosition = new Vector3(0f, capsuleNozzleY, 0f);
+        if (enginePlume != null)
+        {
+            for (int i = 0; i < enginePlume.Length; i++)
+            {
+                enginePlume[i].Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                enginePlume[i].transform.localPosition = capsuleEnginePosition;
+            }
+        }
+        if (exhaustLight != null) exhaustLight.transform.localPosition = capsuleEnginePosition;
         Transform part = firstStage;
         part.SetParent(transform, true);
         separatedStages.Add(part);
-        part.gameObject.AddComponent<FallingStage>().Initialize(new Vector3(0f, -2.2f, 0f), new Vector3(0f, 0f, 12f));
-        SetFlames(firstStageFlames, false);
-        SetFlames(upperStageFlames, fuel > 0f);
-        status = "PRIMERA ETAPA SEPARADA  •  SEGUNDA ETAPA ACTIVA";
+        part.gameObject.AddComponent<FallingStage>().Initialize(new Vector3(0f, -2.2f, 0f), new Vector3(0f, 0f, 12f), this);
+        status = "PRIMERA ETAPA SEPARADA · CÚPULA DE LOS ASTRONAUTAS EN ASCENSO";
     }
 
     public void AddFuel()
@@ -317,10 +508,22 @@ public sealed class LaunchDemo : MonoBehaviour
         status = fuel >= 100f ? "TANQUES LLENOS · LISTO PARA DESPEGAR" : "COMBUSTIBLE CARGADO · RECOMENDADO: 100%";
     }
 
+    public void SetFuelLevel(float level)
+    {
+        if (State != FlightState.Preparing) return;
+        fuel = Mathf.Clamp(level, 0f, 100f);
+        status = fuel >= 25f ? "NIVEL DE COMBUSTIBLE CONFIGURADO · LISTO PARA DESPEGAR" : "SELECCIONA AL MENOS 25% PARA INICIAR";
+    }
+
+    public void SetSpeedMultiplier(float multiplier)
+    {
+        SpeedMultiplier = Mathf.Clamp(multiplier, 1f, 20f);
+    }
+
     public void Launch()
     {
         if (State != FlightState.Preparing) return;
-        if (fuel < 25f) { status = "AÑADE COMBUSTIBLE ANTES DEL DESPEGUE"; return; }
+        if (!Simulation.PrepararLanzamiento()) return;
         State = FlightState.Countdown;
         Countdown = 5f;
         launchElapsed = rocketHeight = 0f;
@@ -330,27 +533,33 @@ public sealed class LaunchDemo : MonoBehaviour
     public void AbortMission()
     {
         if (State != FlightState.Countdown && State != FlightState.Flying && State != FlightState.Coasting) return;
+        Simulation.Abortar();
         State = FlightState.Failed;
         Speed = 0f;
         Countdown = 0f;
         status = "MISIÓN ABORTADA POR CONTROL DE TIERRA";
-        SetEngines(false);
         if (padSmoke != null) padSmoke.Stop(true, ParticleSystemStopBehavior.StopEmitting);
     }
 
     public void ResetDemo()
     {
-        SetEngines(false);
+        NewMission(Simulation.Parametros.Semilla, Simulation.Parametros.NumeroMision);
         foreach (Transform piece in separatedStages) if (piece != null) Destroy(piece.gameObject);
         separatedStages.Clear();
+        foreach (Mesh mesh in generatedResources.FindAll(resource => resource is Mesh).ConvertAll(resource => (Mesh)resource))
+        {
+            generatedResources.Remove(mesh);
+            if (mesh != null) Destroy(mesh);
+        }
         rocket.gameObject.SetActive(false);
         Destroy(rocket.gameObject);
-        fuel = 0f; boostersSeparated = firstStageSeparated = false;
+        fuel = 100f; boostersSeparated = firstStageSeparated = false;
         rocketHeight = launchElapsed = Speed = Countdown = 0f;
         State = FlightState.Preparing;
         padSmoke.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
         engineAudio.volume = 0f;
         BuildRocket();
+        if (parachutes != null) { Destroy(parachutes); parachutes = null; }
         UpdateCamera(false);
         status = "CARGA COMBUSTIBLE PARA PREPARAR EL DESPEGUE";
     }
@@ -408,6 +617,200 @@ public sealed class LaunchDemo : MonoBehaviour
         obj.GetComponent<Renderer>().sharedMaterial = material;
     }
 
+    private void ApplyRealisticRocketFinish(Transform part, string finishName, Color tint, float metallic, float smoothness)
+    {
+        if (part == null) return;
+        if (!rocketFinishMaterials.TryGetValue(finishName, out Material material))
+        {
+            material = CreateRocketFinishMaterial(finishName, tint, metallic, smoothness);
+            rocketFinishMaterials.Add(finishName, material);
+            generatedResources.Add(material);
+        }
+
+        foreach (Renderer renderer in part.GetComponentsInChildren<Renderer>(true))
+        {
+            int slotCount = Mathf.Max(1, renderer.sharedMaterials.Length);
+            Material[] finishMaterials = new Material[slotCount];
+            for (int i = 0; i < finishMaterials.Length; i++) finishMaterials[i] = material;
+            renderer.sharedMaterials = finishMaterials;
+        }
+    }
+
+    private Material CreateRocketFinishMaterial(string finishName, Color tint, float metallic, float smoothness)
+    {
+        Shader shader = FindLitShader();
+        var material = new Material(shader) { name = "Rocket finish • " + finishName, color = tint };
+        material.SetColor("_BaseColor", tint);
+        material.SetColor("_Color", tint);
+        material.SetFloat("_Metallic", metallic);
+        material.SetFloat("_Smoothness", smoothness);
+        material.SetFloat("_Glossiness", smoothness);
+        EnsureRocketFinishTextures();
+        material.SetTexture("_BaseMap", rocketFinishAlbedo);
+        material.SetTexture("_MainTex", rocketFinishAlbedo);
+        material.SetTextureScale("_BaseMap", new Vector2(1.8f, 2.4f));
+        material.SetTextureScale("_MainTex", new Vector2(1.8f, 2.4f));
+        material.SetTexture("_BumpMap", rocketFinishNormal);
+        material.SetFloat("_BumpScale", 0.28f);
+        material.EnableKeyword("_NORMALMAP");
+        return material;
+    }
+
+    private void ApplyLandingTerrainFinish(GameObject launchSite)
+    {
+        if (launchSite == null) return;
+        if (terrainMaterial == null)
+        {
+            EnsureTerrainTextures();
+            terrainMaterial = new Material(FindLitShader())
+            {
+                name = "Weathered launch terrain",
+                color = new Color(0.72f, 0.74f, 0.73f)
+            };
+            terrainMaterial.SetColor("_BaseColor", terrainMaterial.color);
+            terrainMaterial.SetColor("_Color", terrainMaterial.color);
+            terrainMaterial.SetFloat("_Metallic", 0.08f);
+            terrainMaterial.SetFloat("_Smoothness", 0.32f);
+            terrainMaterial.SetFloat("_Glossiness", 0.32f);
+            terrainMaterial.SetTexture("_BaseMap", terrainAlbedo);
+            terrainMaterial.SetTexture("_MainTex", terrainAlbedo);
+            terrainMaterial.SetTexture("_BumpMap", terrainNormal);
+            terrainMaterial.SetFloat("_BumpScale", 0.55f);
+            terrainMaterial.EnableKeyword("_NORMALMAP");
+            terrainMaterial.SetTextureScale("_BaseMap", new Vector2(18f, 18f));
+            terrainMaterial.SetTextureScale("_MainTex", new Vector2(18f, 18f));
+            generatedResources.Add(terrainMaterial);
+        }
+        launchSite.GetComponent<Renderer>().sharedMaterial = terrainMaterial;
+    }
+
+    private static Shader FindLitShader()
+    {
+        Shader shader = GraphicsSettings.currentRenderPipeline != null
+            ? Shader.Find("Universal Render Pipeline/Lit")
+            : Shader.Find("Standard");
+        if (shader == null) shader = Shader.Find("Standard");
+        return shader;
+    }
+
+    private void EnsureTerrainTextures()
+    {
+        if (terrainAlbedo != null) return;
+        const int resolution = 256;
+        terrainAlbedo = new Texture2D(resolution, resolution, TextureFormat.RGBA32, true, false)
+        {
+            name = "Launch terrain weathered concrete",
+            wrapMode = TextureWrapMode.Repeat,
+            filterMode = FilterMode.Trilinear
+        };
+        terrainNormal = new Texture2D(resolution, resolution, TextureFormat.RGBA32, true, true)
+        {
+            name = "Launch terrain roughness relief",
+            wrapMode = TextureWrapMode.Repeat,
+            filterMode = FilterMode.Trilinear
+        };
+
+        var heights = new float[resolution * resolution];
+        var colors = new Color[heights.Length];
+        var normals = new Color[heights.Length];
+        for (int y = 0; y < resolution; y++)
+        {
+            for (int x = 0; x < resolution; x++)
+            {
+                float u = (float)x / resolution;
+                float v = (float)y / resolution;
+                float broad = TilingPerlin(u, v, 6f, 3.1f, 8.7f);
+                float medium = TilingPerlin(u, v, 25f, 11.2f, 2.4f);
+                float grain = TilingPerlin(u, v, 91f, 5.6f, 19.3f);
+                float crackNoise = Mathf.Abs(TilingPerlin(u, v, 17f, 4.3f, 13.1f) - 0.5f);
+                float cracks = Mathf.SmoothStep(0.012f, 0.045f, crackNoise);
+                float height = 0.48f + broad * 0.2f + medium * 0.13f + grain * 0.04f;
+                heights[y * resolution + x] = height;
+                float albedo = (0.59f + broad * 0.22f + medium * 0.13f + (grain - 0.5f) * 0.08f) * Mathf.Lerp(0.72f, 1f, cracks);
+                colors[y * resolution + x] = new Color(albedo, albedo * 0.99f, albedo * 0.96f, 1f);
+            }
+        }
+
+        for (int y = 0; y < resolution; y++)
+        {
+            int previousY = (y + resolution - 1) % resolution;
+            int nextY = (y + 1) % resolution;
+            for (int x = 0; x < resolution; x++)
+            {
+                int previousX = (x + resolution - 1) % resolution;
+                int nextX = (x + 1) % resolution;
+                float dx = heights[y * resolution + nextX] - heights[y * resolution + previousX];
+                float dy = heights[nextY * resolution + x] - heights[previousY * resolution + x];
+                Vector3 normal = new Vector3(-dx * 5f, -dy * 5f, 1f).normalized;
+                normals[y * resolution + x] = new Color(normal.x * 0.5f + 0.5f, normal.y * 0.5f + 0.5f, normal.z, 1f);
+            }
+        }
+        terrainAlbedo.SetPixels(colors);
+        terrainAlbedo.Apply(true, true);
+        terrainNormal.SetPixels(normals);
+        terrainNormal.Apply(true, true);
+        generatedResources.Add(terrainAlbedo);
+        generatedResources.Add(terrainNormal);
+    }
+
+    private static float TilingPerlin(float u, float v, float frequency, float offsetU, float offsetV)
+    {
+        float x = u * frequency + offsetU;
+        float y = v * frequency + offsetV;
+        float blendU = Mathf.SmoothStep(0f, 1f, u);
+        float blendV = Mathf.SmoothStep(0f, 1f, v);
+        float lower = Mathf.Lerp(Mathf.PerlinNoise(x, y), Mathf.PerlinNoise(x - frequency, y), blendU);
+        float upper = Mathf.Lerp(Mathf.PerlinNoise(x, y - frequency), Mathf.PerlinNoise(x - frequency, y - frequency), blendU);
+        return Mathf.Lerp(lower, upper, blendV);
+    }
+
+    private void EnsureRocketFinishTextures()
+    {
+        if (rocketFinishAlbedo != null) return;
+        const int resolution = 256;
+        rocketFinishAlbedo = new Texture2D(resolution, resolution, TextureFormat.RGBA32, true, false)
+        {
+            name = "Rocket ceramic panel grain",
+            wrapMode = TextureWrapMode.Repeat,
+            filterMode = FilterMode.Trilinear
+        };
+        rocketFinishNormal = new Texture2D(resolution, resolution, TextureFormat.RGBA32, true, true)
+        {
+            name = "Rocket subtle surface relief",
+            wrapMode = TextureWrapMode.Repeat,
+            filterMode = FilterMode.Trilinear
+        };
+
+        var random = new System.Random(412);
+        var colorPixels = new Color[resolution * resolution];
+        var normalPixels = new Color[colorPixels.Length];
+        for (int y = 0; y < resolution; y++)
+        {
+            for (int x = 0; x < resolution; x++)
+            {
+                float grain = 0.965f + (float)random.NextDouble() * 0.055f;
+                bool horizontalJoint = y % 48 < 2;
+                bool verticalJoint = x % 64 < 2 && y % 48 > 5;
+                float panelTone = 0.985f + (float)((x / 64 + (y / 48) * 3) % 4) * 0.009f;
+                float seam = horizontalJoint || verticalJoint ? 0.84f : 1f;
+                float albedo = grain * panelTone * seam;
+                colorPixels[y * resolution + x] = new Color(albedo, albedo, albedo, 1f);
+
+                float reliefX = ((float)random.NextDouble() - 0.5f) * 0.025f;
+                float reliefY = ((float)random.NextDouble() - 0.5f) * 0.025f;
+                if (horizontalJoint) reliefY = 0.08f;
+                if (verticalJoint) reliefX = 0.08f;
+                normalPixels[y * resolution + x] = new Color(0.5f + reliefX, 0.5f + reliefY, 1f, 1f);
+            }
+        }
+        rocketFinishAlbedo.SetPixels(colorPixels);
+        rocketFinishAlbedo.Apply(true, true);
+        rocketFinishNormal.SetPixels(normalPixels);
+        rocketFinishNormal.Apply(true, true);
+        generatedResources.Add(rocketFinishAlbedo);
+        generatedResources.Add(rocketFinishNormal);
+    }
+
     private ParticleSystem[] CreateEnginePlume(Transform parent, string label, Vector3 localPosition, float sizeScale)
     {
         return new[]
@@ -425,7 +828,7 @@ public sealed class LaunchDemo : MonoBehaviour
         GameObject go = new GameObject(label);
         go.transform.SetParent(parent, false);
         go.transform.localPosition = localPosition;
-        go.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+        go.transform.localRotation = Quaternion.identity;
         ParticleSystem ps = go.AddComponent<ParticleSystem>();
         ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
         var main = ps.main;
@@ -444,7 +847,10 @@ public sealed class LaunchDemo : MonoBehaviour
         var shape = ps.shape;
         shape.enabled = true;
         shape.shapeType = ParticleSystemShapeType.Cone;
-        shape.angle = coneAngle;
+        shape.rotation = new Vector3(90f, 0f, 0f);
+        shape.angle = Mathf.Min(coneAngle, 0.35f);
+        shape.randomDirectionAmount = 0f;
+        shape.sphericalDirectionAmount = 0f;
         shape.radius = 0.12f * sizeScale;
         shape.radiusThickness = 1f;
         var colorLife = ps.colorOverLifetime;
@@ -471,7 +877,7 @@ public sealed class LaunchDemo : MonoBehaviour
         renderer.sharedMaterial = fireMaterial;
         renderer.shadowCastingMode = ShadowCastingMode.Off;
         var noise = ps.noise;
-        noise.enabled = true; noise.strength = 0.18f; noise.frequency = 2f; noise.scrollSpeed = 1.5f;
+        noise.enabled = false;
         return ps;
     }
 
@@ -486,22 +892,29 @@ public sealed class LaunchDemo : MonoBehaviour
         var main = ps.main;
         main.playOnAwake = false;
         main.simulationSpace = ParticleSystemSimulationSpace.World;
-        main.startLifetime = ground ? 5f : 3.4f;
+        main.startLifetime = ground ? 2.4f : 3.4f;
         main.startSpeed = ground ? new ParticleSystem.MinMaxCurve(1f, 3.5f) : new ParticleSystem.MinMaxCurve(3f, 5f);
         main.startSize = new ParticleSystem.MinMaxCurve(0.6f * scale, 1.1f * scale);
         main.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
         main.maxParticles = 450;
-        var emission = ps.emission; emission.rateOverTime = ground ? 55f : 26f;
-        var shape = ps.shape; shape.shapeType = ParticleSystemShapeType.Cone; shape.angle = ground ? 75f : 12f; shape.radius = ground ? 1f : 0.12f * scale;
+        var emission = ps.emission; emission.rateOverTime = ground ? 32f : 26f;
+        var shape = ps.shape; shape.shapeType = ParticleSystemShapeType.Cone; shape.angle = ground ? 55f : 0.35f; shape.radius = ground ? 0.75f : 0.04f * scale;
+        shape.randomDirectionAmount = 0f;
+        shape.sphericalDirectionAmount = 0f;
         var color = ps.colorOverLifetime; color.enabled = true;
         var gradient = new Gradient();
         gradient.SetKeys(new[] { new GradientColorKey(new Color(0.65f, 0.61f, 0.54f), 0f), new GradientColorKey(new Color(0.3f, 0.36f, 0.4f), 1f) }, new[] { new GradientAlphaKey(0f, 0f), new GradientAlphaKey(0.35f, 0.12f), new GradientAlphaKey(0f, 1f) });
         color.color = gradient;
         var size = ps.sizeOverLifetime; size.enabled = true;
         size.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0f, 0.5f, 1f, ground ? 8f : 5f));
-        var noise = ps.noise; noise.enabled = true; noise.strength = 0.65f; noise.frequency = 0.35f; noise.scrollSpeed = 0.3f;
+        var noise = ps.noise;
+        noise.enabled = false;
+        noise.strength = 0.16f;
+        noise.frequency = 0.35f;
+        noise.scrollSpeed = 0.12f;
         var velocity = ps.velocityOverLifetime; velocity.enabled = true; velocity.space = ParticleSystemSimulationSpace.World;
-        velocity.x = 0.7f; velocity.y = ground ? 0.4f : 0.2f;
+        velocity.x = 0f;
+        velocity.y = ground ? 0.18f : -0.35f;
         if (smokeMaterial == null)
         {
             smokeMaterial = new Material(Resources.Load<Shader>("AuroraExhaust"));
@@ -555,26 +968,17 @@ public sealed class LaunchDemo : MonoBehaviour
         foreach (Object resource in generatedResources) if (resource != null) Destroy(resource);
     }
 
-    private static void SetFlames(ParticleSystem[] systems, bool on)
-    {
-        if (systems == null) return;
-        foreach (ParticleSystem system in systems)
-        {
-            if (system == null) continue;
-            if (on && !system.isPlaying) system.Play(true);
-            else if (!on && system.isPlaying) system.Stop(true, ParticleSystemStopBehavior.StopEmitting);
-        }
-    }
-
     private sealed class FallingStage : MonoBehaviour
     {
         private Vector3 velocity, spin;
-        public void Initialize(Vector3 initialVelocity, Vector3 initialSpin) { velocity = initialVelocity; spin = initialSpin; }
+        private LaunchDemo mission;
+        public void Initialize(Vector3 initialVelocity, Vector3 initialSpin, LaunchDemo controller) { velocity = initialVelocity; spin = initialSpin; mission = controller; }
         private void Update()
         {
-            velocity += Vector3.down * 2.2f * Time.deltaTime;
-            transform.position += velocity * Time.deltaTime;
-            transform.Rotate(spin * Time.deltaTime, Space.Self);
+            float delta = Time.deltaTime * (mission != null ? mission.SpeedMultiplier : 1f);
+            velocity += Vector3.down * 2.2f * delta;
+            transform.position += velocity * delta;
+            transform.Rotate(spin * delta, Space.Self);
             if (transform.position.y < -25f) Destroy(gameObject);
         }
     }

@@ -1,0 +1,6 @@
+{
+  "name": "Artemis.Domain",
+  "references": ["Unity.Newtonsoft.Json"],
+  "autoReferenced": true,
+  "noEngineReferences": true
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Artemis.Tests",
+  "references": ["Artemis.Domain", "Unity.Newtonsoft.Json"],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"]
+}

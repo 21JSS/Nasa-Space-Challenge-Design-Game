@@ -1,0 +1,162 @@
+[
+  {
+    "id": 1,
+    "perfil": "Configuración Óptima Real",
+    "material": "AlLi2195",
+    "combustible": "LH2_LOX",
+    "capa_termica": "Avcoat",
+    "masas_secas_t": {
+      "boosters_srb": 197.0,
+      "etapa_central": 85.0,
+      "etapa_icps": 3.5,
+      "casco_orion_las": 33.15,
+      "capa_termica": 0.85
+    },
+    "masa_seca_total_Mf_t": 319.5,
+    "propelente_total_Mp_t": 2290.5,
+    "masa_cargada_M0_t": 2610.0,
+    "relacion_masa": 8.169,
+    "costo_total_estimado_musd": 3468.0,
+    "descripcion": "Máximo rendimiento (Δv), pero con un costo de fabricación elevado."
+  },
+  {
+    "id": 2,
+    "perfil": "Reutilizable Óptimo",
+    "material": "AlLi2195",
+    "combustible": "LH2_LOX",
+    "capa_termica": "Losetas",
+    "masas_secas_t": {
+      "boosters_srb": 197.0,
+      "etapa_central": 85.0,
+      "etapa_icps": 3.5,
+      "casco_orion_las": 33.15,
+      "capa_termica": 0.45
+    },
+    "masa_seca_total_Mf_t": 319.1,
+    "propelente_total_Mp_t": 2290.5,
+    "masa_cargada_M0_t": 2609.6,
+    "relacion_masa": 8.178,
+    "costo_total_estimado_musd": 3486.6,
+    "descripcion": "Ligeramente más ligero en la cápsula, pero frágil ante micrometeoritos o manejo brusco en órbita."
+  },
+  {
+    "id": 3,
+    "perfil": "Alternativa Kerolox",
+    "material": "AlLi2195",
+    "combustible": "RP1_LOX",
+    "capa_termica": "Corcho",
+    "masas_secas_t": {
+      "boosters_srb": 197.0,
+      "etapa_central": 85.0,
+      "etapa_icps": 3.5,
+      "casco_orion_las": 33.15,
+      "capa_termica": 1.2
+    },
+    "masa_seca_total_Mf_t": 319.85,
+    "propelente_total_Mp_t": 2458.5,
+    "masa_cargada_M0_t": 2778.35,
+    "relacion_masa": 8.686,
+    "costo_total_estimado_musd": 3322.5,
+    "descripcion": "Tanques más compactos y económicos, pero requiere mucha más masa de combustible por su menor Isp."
+  },
+  {
+    "id": 4,
+    "perfil": "Económico / Estilo Starship",
+    "material": "Acero301",
+    "combustible": "LH2_LOX",
+    "capa_termica": "Avcoat",
+    "masas_secas_t": {
+      "boosters_srb": 197.0,
+      "etapa_central": 114.75,
+      "etapa_icps": 4.725,
+      "casco_orion_las": 33.15,
+      "capa_termica": 0.85
+    },
+    "masa_seca_total_Mf_t": 350.48,
+    "propelente_total_Mp_t": 2290.5,
+    "masa_cargada_M0_t": 2640.98,
+    "relacion_masa": 7.535,
+    "costo_total_estimado_musd": 3201.5,
+    "descripcion": "Aumenta el peso vacío estructural en ~31 t; reduce margen de carga útil y Δv."
+  },
+  {
+    "id": 5,
+    "perfil": "Bajo Costo / Alto Peso",
+    "material": "Acero301",
+    "combustible": "RP1_LOX",
+    "capa_termica": "Losetas",
+    "masas_secas_t": {
+      "boosters_srb": 197.0,
+      "etapa_central": 114.75,
+      "etapa_icps": 4.725,
+      "casco_orion_las": 33.15,
+      "capa_termica": 0.45
+    },
+    "masa_seca_total_Mf_t": 350.07,
+    "propelente_total_Mp_t": 2458.5,
+    "masa_cargada_M0_t": 2808.57,
+    "relacion_masa": 8.023,
+    "costo_total_estimado_musd": 3108.6,
+    "descripcion": "Muy barato de fabricar, pero penaliza fuertemente la aceleración y el despegue."
+  },
+  {
+    "id": 6,
+    "perfil": "Estándar Comercial",
+    "material": "Al2024",
+    "combustible": "LH2_LOX",
+    "capa_termica": "Avcoat",
+    "masas_secas_t": {
+      "boosters_srb": 197.0,
+      "etapa_central": 97.75,
+      "etapa_icps": 4.025,
+      "casco_orion_las": 33.15,
+      "capa_termica": 0.85
+    },
+    "masa_seca_total_Mf_t": 332.77,
+    "propelente_total_Mp_t": 2290.5,
+    "masa_cargada_M0_t": 2623.27,
+    "relacion_masa": 7.883,
+    "costo_total_estimado_musd": 3254.5,
+    "descripcion": "Balance aceptable entre costo y penalización de peso para presupuesto medio."
+  },
+  {
+    "id": 7,
+    "perfil": "Alto Rendimiento Estructural",
+    "material": "Ti6Al4V",
+    "combustible": "LH2_LOX",
+    "capa_termica": "Avcoat",
+    "masas_secas_t": {
+      "boosters_srb": 197.0,
+      "etapa_central": 72.25,
+      "etapa_icps": 2.975,
+      "casco_orion_las": 33.15,
+      "capa_termica": 0.85
+    },
+    "masa_seca_total_Mf_t": 306.23,
+    "propelente_total_Mp_t": 2290.5,
+    "masa_cargada_M0_t": 2596.73,
+    "relacion_masa": 8.48,
+    "costo_total_estimado_musd": 3644.4,
+    "descripcion": "Muy ligero y resistente al calor moderado; costo prohibitivo si el presupuesto es ajustado."
+  },
+  {
+    "id": 8,
+    "perfil": "Máxima Eficiencia Extrema",
+    "material": "CFRP",
+    "combustible": "LH2_LOX",
+    "capa_termica": "Losetas",
+    "masas_secas_t": {
+      "boosters_srb": 197.0,
+      "etapa_central": 59.5,
+      "etapa_icps": 2.45,
+      "casco_orion_las": 33.15,
+      "capa_termica": 0.45
+    },
+    "masa_seca_total_Mf_t": 292.55,
+    "propelente_total_Mp_t": 2290.5,
+    "masa_cargada_M0_t": 2583.05,
+    "relacion_masa": 8.829,
+    "costo_total_estimado_musd": 3820.8,
+    "descripcion": "El más ligero y con mayor relación de masa; vulnerable al agrietamiento por vibración acústica en Max Q."
+  }
+]

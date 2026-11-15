@@ -1,3 +1,6 @@
+using System;
+using System.Linq;
+using Artemis;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.EventSystems;
@@ -6,160 +9,200 @@ using TMPro;
 using UnityEngine.InputSystem.UI;
 #endif
 
-/// <summary>Responsive launch controls and telemetry, built once per scene.</summary>
+/// <summary>uGUI traduce entradas a comandos; las reglas permanecen en Artemis.Domain.</summary>
 public sealed class LaunchHud : MonoBehaviour
 {
-    private static readonly Color Ink = new Color(0.025f, 0.045f, 0.065f, 0.96f);
-    private static readonly Color Muted = new Color(0.53f, 0.65f, 0.7f);
-    private static readonly Color Cyan = new Color(0.35f, 0.91f, 0.88f);
-    private static readonly Color Orange = new Color(1f, 0.49f, 0.2f);
-    private LaunchDemo mission;
-    private TextMeshProUGUI fuelText, altitudeText, speedText, statusText, phaseText, timerText, countdownText, stageText, windSpeedText, windDirectionText, windArrow;
-    private UnityEngine.UI.Image fuelFill, flightFill;
-    private UnityEngine.UI.Button fuelButton, launchButton, abortButton;
-    private RectTransform canvasRoot;
-
+    static readonly Color Ink=new Color(.025f,.045f,.065f,.97f), Muted=new Color(.64f,.73f,.79f), Cyan=new Color(.35f,.91f,.88f), Orange=new Color(1,.49f,.2f), Surface=new Color(.065f,.115f,.15f);
+    LaunchDemo view;
+    RectTransform root,design,flight,result,details;
+    TextMeshProUGUI detailsText;
+    TextMeshProUGUI site,phase,status,telemetry,risk,evaluation,budget,flightInfo,log,report,countdown,timer,entryText,bankText;
+    UnityEngine.UI.Button material,fuel,shield,crew,autonomy,launch,wait,accept,assist,primary,secondary,tertiary,engineContinue,engineAbort,pause,energy,bankAuto,chuteAuto,camera,audio,numberButton,generate;
+    UnityEngine.UI.Button[] profiles;
+    UnityEngine.UI.Slider entrySlider,bankSlider;
+    TMP_InputField seedInput;
+    int number=1; Mision lastMission;
     public void Initialize(LaunchDemo controller)
     {
-        mission = controller;
-        var canvasObject = new GameObject("Mission Control", typeof(RectTransform), typeof(Canvas), typeof(UnityEngine.UI.CanvasScaler), typeof(UnityEngine.UI.GraphicRaycaster));
-        canvasObject.transform.SetParent(transform, false);
-        canvasRoot = canvasObject.GetComponent<RectTransform>();
-        canvasObject.GetComponent<Canvas>().renderMode = RenderMode.ScreenSpaceOverlay;
-        var scaler = canvasObject.GetComponent<UnityEngine.UI.CanvasScaler>();
-        scaler.uiScaleMode = UnityEngine.UI.CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1600f, 900f);
-        scaler.matchWidthOrHeight = 0.5f;
-        if (FindFirstObjectByType<EventSystem>() == null)
+        view=controller;
+        var go=new GameObject("Mission Control",typeof(RectTransform),typeof(Canvas),typeof(UnityEngine.UI.CanvasScaler),typeof(UnityEngine.UI.GraphicRaycaster));
+        go.transform.SetParent(transform,false); root=go.GetComponent<RectTransform>(); go.GetComponent<Canvas>().renderMode=RenderMode.ScreenSpaceOverlay;
+        var scaler=go.GetComponent<UnityEngine.UI.CanvasScaler>(); scaler.uiScaleMode=UnityEngine.UI.CanvasScaler.ScaleMode.ScaleWithScreenSize; scaler.referenceResolution=new Vector2(1600,900); scaler.matchWidthOrHeight=.5f;
+        if(FindAnyObjectByType<EventSystem>()==null)
         {
-            var events = new GameObject("Launch Event System", typeof(EventSystem));
-            events.transform.SetParent(transform, false);
+            var events=new GameObject("Launch Event System",typeof(EventSystem)); events.transform.SetParent(transform,false);
 #if ENABLE_INPUT_SYSTEM
             events.AddComponent<InputSystemUIInputModule>();
 #else
             events.AddComponent<StandaloneInputModule>();
 #endif
         }
+        var header=Panel(root,"Header",new Vector2(0,1),new Vector2(28,-22),new Vector2(1100,100),Color.clear);
+        Label(header,"AURORA  /  ARTEMIS",33,Color.white,0,0,700,43,true);
+        Label(header,"DISEÑA. EXPLORA. REGRESA A CASA.",12,Cyan,2,46,750,22);
+        site=Label(header,"",13,Muted,2,71,1100,24);
+        camera=Button(root,"Camera","VISTA / CABINA",1155,28,190,40,()=>view.ToggleCamera());
+        audio=Button(root,"Audio","AUDIO: ON",1357,28,215,40,()=>view.ToggleAudio());
+        Button(root,"Details","PERFIL Y BITÁCORA",915,28,225,40,()=>details.gameObject.SetActive(!details.gameObject.activeSelf));
 
-        var header = Panel(canvasRoot, "Header", new Vector2(0f, 1f), new Vector2(28f, -28f), new Vector2(550f, 90f), Color.clear);
-        Label(header, "SPACEFLIGHT / LAB", 17, Cyan, 0, 0, 520, 25);
-        Label(header, "AURORA", 48, Color.white, 0, 27, 340, 60, FontStyles.Bold);
-        Label(header, "01", 26, Orange, 245, 45, 80, 36);
+        design=Panel(root,"Vehicle design",new Vector2(0,1),new Vector2(28,-138),new Vector2(375,635),Ink);
+        Label(design,"01  /  DISEÑO Y ABORDAJE",19,Cyan,20,16,340,28,true);
+        profiles=new UnityEngine.UI.Button[8];
+        string[] names={"01 · AL-LI / AVCOAT","02 · AL-LI / LOSETAS","03 · KERO / CORCHO","04 · ACERO / AVCOAT","05 · ACERO / KERO","06 · ALUMINIO 2024","07 · TITANIO","08 · FIBRA CARBONO"};
+        for(int i=0;i<8;i++) { int n=i; profiles[i]=Button(design,"Profile"+(i+1),names[i],20+i%2*172,54+i/2*35,164,29,()=>view.ChooseProfile(n),false,11); }
+        material=Button(design,"Material","",20,202,335,34,view.CycleMaterial);
+        fuel=Button(design,"Propellant","",20,241,335,34,view.CycleFuel);
+        shield=Button(design,"HeatShield","",20,280,335,34,view.CycleShield);
+        evaluation=Label(design,"",14,Color.white,20,324,335,49);
+        budget=Label(design,"",13,Cyan,20,378,335,44);
+        crew=Button(design,"BoardCrew","ABORDAR 4 ASTRONAUTAS",20,429,335,34,()=>view.Simulation.Abordar());
+        autonomy=Button(design,"Autonomy","",20,470,164,30,()=>view.Simulation.ConfigurarAutonomia(view.Simulation.Parametros.AutonomiaDias>=21?8:view.Simulation.Parametros.AutonomiaDias+1),false,12);
+        assist=Button(design,"Guidance","",192,470,163,30,()=>view.Simulation.ConfigurarAsistencia(!view.Simulation.Asistencia),false,12);
+        wait=Button(design,"WaitWeather","ESPERAR CLIMA",20,508,164,30,()=>view.Simulation.EsperarClima(),false,12);
+        accept=Button(design,"AcceptWeather","ACEPTAR RIESGO",192,508,163,30,()=>view.Simulation.AceptarClima(),false,12);
+        launch=Button(design,"LaunchButton","INICIAR DESPEGUE / ESPACIO",20,554,335,57,view.Launch,true,16);
 
-        var panel = Panel(canvasRoot, "Launch console", new Vector2(0f, 0.5f), new Vector2(28f, 0f), new Vector2(365f, 570f), Ink);
-        Panel(panel, "Accent", new Vector2(0f, 1f), Vector2.zero, new Vector2(3f, 570f), Cyan);
-        Label(panel, "CONTROL DE LANZAMIENTO", 16, Muted, 24, 22, 320, 24);
-        phaseText = Label(panel, "01 / PREPARACIÓN", 26, Color.white, 24, 56, 320, 38, FontStyles.Bold);
-        Label(panel, "PROPULSANTE", 13, Muted, 24, 123, 200, 22);
-        fuelText = Label(panel, "0<color=#78929E><size=24>%</size></color>", 54, Color.white, 24, 143, 320, 68, FontStyles.Bold);
-        var fuelTrack = Panel(panel, "Fuel track", new Vector2(0f, 1f), new Vector2(24f, -224f), new Vector2(317f, 7f), new Color(0.13f, 0.21f, 0.25f));
-        fuelFill = Panel(fuelTrack, "Fuel", new Vector2(0f, 1f), Vector2.zero, new Vector2(0f, 7f), Cyan).GetComponent<UnityEngine.UI.Image>();
-        Label(panel, "Carga recomendada: 100%", 14, Muted, 24, 241, 320, 24);
-        fuelButton = Button(panel, "FuelButton", "+  CARGAR COMBUSTIBLE", 24, 290, 317, 55, new Color(0.12f, 0.24f, 0.28f), Color.white, mission.AddFuel);
-        Label(panel, "+25% por carga  /  tecla F", 12, Muted, 24, 351, 317, 21);
-        launchButton = Button(panel, "LaunchButton", "INICIAR DESPEGUE", 24, 390, 317, 62, Orange, Ink, mission.Launch);
-        Label(panel, "Cuenta regresiva automática  /  ESPACIO", 12, Muted, 24, 460, 317, 24);
-        Button(panel, "ResetButton", "REINICIAR MISIÓN   /   R", 24, 511, 317, 36, new Color(0.08f, 0.13f, 0.17f), Muted, mission.ResetDemo);
+        var planning=Panel(root,"Mission seed",new Vector2(1,1),new Vector2(-28,-138),new Vector2(270,128),Ink);
+        Label(planning,"SEMILLA DE MISIÓN",11,Muted,16,12,235,19);
+        seedInput=Input(planning,16,37,135,34,"2026");
+        generate=Button(planning,"Generate","GENERAR",161,37,93,34,()=> { if(int.TryParse(seedInput.text,out int seed)) view.GenerateMission(seed,number); },false,12);
+        numberButton=Button(planning,"MissionNumber","",16,82,238,29,()=> { number=number%8+1; if(int.TryParse(seedInput.text,out int seed)) view.GenerateMission(seed,number); },false,11);
+        var t=Panel(root,"Telemetry",new Vector2(1,1),new Vector2(-28,-280),new Vector2(270,270),Ink);
+        Label(t,"TELEMETRÍA  /  SI",12,Cyan,16,14,240,22);
+        telemetry=Label(t,"",16,Color.white,16,48,238,206); telemetry.lineSpacing=8;
+        var r=Panel(root,"Design assessment",new Vector2(1,1),new Vector2(-28,-564),new Vector2(270,209),Ink);
+        Label(r,"PERFIL Y RIESGOS",12,Orange,16,13,238,22);
+        risk=Label(r,"",13,Muted,16,43,238,153);
 
-        var telemetry = Panel(canvasRoot, "Telemetry", new Vector2(1f, 1f), new Vector2(-28f, -28f), new Vector2(242f, 195f), Ink);
-        Label(telemetry, "TELEMETRÍA EN VIVO", 13, Cyan, 20, 16, 210, 22);
-        Label(telemetry, "ALTITUD", 12, Muted, 20, 56, 200, 20);
-        altitudeText = Label(telemetry, "0000 <size=17>m</size>", 34, Color.white, 20, 76, 210, 42, FontStyles.Bold);
-        Label(telemetry, "VELOCIDAD VERTICAL", 12, Muted, 20, 129, 210, 20);
-        speedText = Label(telemetry, "0.0 <size=14>m/s</size>", 25, Color.white, 20, 151, 210, 34);
+        flight=Panel(root,"Flight controls",new Vector2(0,1),new Vector2(28,-138),new Vector2(375,635),Ink);
+        phase=Label(flight,"",21,Cyan,20,18,335,32,true);
+        flightInfo=Label(flight,"",14,Color.white,20,65,335,115);
+        primary=Button(flight,"PrimaryAction","",20,193,335,44,Primary,true);
+        secondary=Button(flight,"SecondaryAction","",20,247,335,36,Secondary);
+        tertiary=Button(flight,"TertiaryAction","",20,291,335,36,()=>view.Simulation.CorregirTrayectoria(-1));
+        energy=Button(flight,"PowerSave","",20,335,335,33,()=>view.Simulation.AlternarEnergia());
+        entryText=Label(flight,"",12,Muted,20,384,335,21);
+        entrySlider=Slider(flight,"EntryAngle",20,413,335,-8,-4,-6,v=>view.Simulation.AjustarEntrada(v));
+        bankText=Label(flight,"",12,Muted,20,444,335,21);
+        bankSlider=Slider(flight,"BankAngle",20,475,335,0,180,0,v=>view.Simulation.AjustarAlabeo(v));
+        bankAuto=Button(flight,"AutoBank","",20,510,164,30,()=>view.Simulation.AlternarAutoAlabeo(),false,11);
+        chuteAuto=Button(flight,"AutoChutes","",192,510,163,30,()=>view.Simulation.AlternarAutoParacaidas(),false,11);
+        engineContinue=Button(flight,"ContinueEngineOut","CONTINUAR ENGINE-OUT",20,555,213,44,()=>view.Simulation.ContinuarMotor(),true,12);
+        engineAbort=Button(flight,"RejectEngineOut","ABORTAR",241,555,114,44,view.AbortMission);
 
-        var wind = Panel(canvasRoot, "Wind compass", new Vector2(1f, 1f), new Vector2(-28f, -238f), new Vector2(242f, 132f), Ink);
-        Label(wind, "VIENTO SUPERFICIAL", 13, Cyan, 16, 10, 210, 20);
-        Label(wind, "N", 10, Muted, 62, 31, 16, 16, FontStyles.Bold).alignment = TextAlignmentOptions.Center;
-        Label(wind, "E", 10, Muted, 110, 70, 16, 16, FontStyles.Bold).alignment = TextAlignmentOptions.Center;
-        Label(wind, "S", 10, Muted, 62, 105, 16, 16, FontStyles.Bold).alignment = TextAlignmentOptions.Center;
-        Label(wind, "O", 10, Muted, 14, 70, 16, 16, FontStyles.Bold).alignment = TextAlignmentOptions.Center;
-        windArrow = Label(wind, "▲", 22, Orange, 70, 77, 32, 32, FontStyles.Bold);
-        windArrow.alignment = TextAlignmentOptions.Center;
-        windArrow.rectTransform.anchorMin = windArrow.rectTransform.anchorMax = new Vector2(0f, 1f);
-        windArrow.rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        windSpeedText = Label(wind, "0.0 <size=13>m/s</size>", 24, Color.white, 137, 43, 96, 32, FontStyles.Bold);
-        windDirectionText = Label(wind, "HACIA 000°", 12, Muted, 137, 77, 96, 22);
+        result=Panel(root,"Mission report",new Vector2(0,1),new Vector2(28,-138),new Vector2(375,635),Ink);
+        Label(result,"INFORME DE MISIÓN",23,Cyan,20,20,335,34,true);
+        report=Label(result,"",17,Color.white,20,75,335,204);
+        log=Label(result,"",12,Muted,20,301,335,250);
+        Button(result,"RetryMission","REPETIR MISIÓN",20,568,163,42,view.ResetDemo,true);
+        Button(result,"NewMission","NUEVA SEMILLA",192,568,163,42,()=> { int seed=view.Simulation.Parametros.Semilla+1; seedInput.text=seed.ToString(); view.GenerateMission(seed,number); });
 
-        var flight = Panel(canvasRoot, "Flight callout", new Vector2(0.68f, 0.56f), Vector2.zero, new Vector2(420f, 160f), Color.clear);
-        countdownText = Label(flight, "", 85, Color.white, 0, 0, 420, 110, FontStyles.Bold);
-        countdownText.alignment = TextAlignmentOptions.Center;
-        stageText = Label(flight, "", 17, Cyan, 0, 112, 420, 38);
-        stageText.alignment = TextAlignmentOptions.Center;
-
-        var bottom = Panel(canvasRoot, "Mission status", new Vector2(0.5f, 0f), new Vector2(0f, 24f), new Vector2(1544f, 92f), Ink);
-        Label(bottom, "MISIÓN / 600 M", 14, Cyan, 22, 14, 200, 25);
-        statusText = Label(bottom, "", 18, Color.white, 22, 45, 1120, 32);
-        timerText = Label(bottom, "T − 00:05", 28, Color.white, 1320, 23, 200, 40, FontStyles.Bold);
-        timerText.alignment = TextAlignmentOptions.Right;
-        abortButton = Button(bottom, "AbortButton", "ABORTAR", 1155, 22, 140, 46, Orange, Ink, mission.AbortMission);
-        var flightTrack = Panel(bottom, "Mission track", new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(1544f, 3f), new Color(0.1f, 0.2f, 0.24f));
-        flightFill = Panel(flightTrack, "Progress", new Vector2(0f, 0f), Vector2.zero, new Vector2(0f, 3f), Cyan).GetComponent<UnityEngine.UI.Image>();
+        var bottom=Panel(root,"Mission status",new Vector2(.5f,0),new Vector2(0,22),new Vector2(1544,94),Ink);
+        Label(bottom,"CONTROL DE TIERRA",11,Cyan,20,12,700,20);
+        status=Label(bottom,"",14,Color.white,20,39,730,45);
+        Button(bottom,"Speed1","×1",787,44,52,34,()=>view.SetSpeedMultiplier(1));
+        Button(bottom,"Speed5","×5",847,44,52,34,()=>view.SetSpeedMultiplier(5));
+        Button(bottom,"Speed20","×20",907,44,52,34,()=>view.SetSpeedMultiplier(20));
+        pause=Button(bottom,"Pause","PAUSA",980,44,90,34,()=>view.Simulation.Pausar(),false,12);
+        Button(bottom,"AbortButton","ABORTAR",1088,44,113,34,view.AbortMission);
+        timer=Label(bottom,"",13,Muted,787,12,740,21); timer.alignment=TextAlignmentOptions.Right;
+        Button(bottom,"Reset","REINICIAR / R",1220,44,154,34,view.ResetDemo);
+        Button(bottom,"QuickBoard","ABORDAR / F",1386,44,138,34,()=>view.Simulation.Abordar(),false,11);
+        countdown=Label(root,"",75,Color.white,600,260,480,140,true); countdown.alignment=TextAlignmentOptions.Center;
+        details=Panel(root,"Mission details",new Vector2(.5f,.5f),Vector2.zero,new Vector2(820,670),Ink);
+        details.GetComponent<UnityEngine.UI.Image>().raycastTarget=true;
+        Label(details,"EXPEDIENTE DE MISIÓN",24,Cyan,28,22,650,35,true);
+        Button(details,"CloseDetails","CERRAR",674,20,118,38,()=>details.gameObject.SetActive(false));
+        detailsText=Label(details,"",16,Color.white,28,82,764,560);
+        details.gameObject.SetActive(false);
     }
-
-    private void Update()
+    void Update()
     {
-        if (mission == null) return;
-        fuelText.text = Mathf.CeilToInt(mission.Fuel) + "<color=#78929E><size=24>%</size></color>";
-        fuelFill.rectTransform.sizeDelta = new Vector2(317f * mission.Fuel / 100f, 7f);
-        fuelFill.color = mission.Fuel <= 25f ? Orange : Cyan;
-        flightFill.rectTransform.sizeDelta = new Vector2(1544f * Mathf.Clamp01(mission.Altitude / LaunchDemo.TargetAltitude), 3f);
-        altitudeText.text = mission.Altitude.ToString("0000") + " <size=17>m</size>";
-        speedText.text = mission.Speed.ToString("0.0") + " <size=14>m/s</size>";
-        windSpeedText.text = mission.WindSpeed.ToString("0.0") + " <size=13>m/s</size>";
-        windDirectionText.text = "HACIA " + Mathf.RoundToInt(mission.WindDirection).ToString("000") + "°";
-        windArrow.rectTransform.localEulerAngles = new Vector3(0f, 0f, -mission.WindDirection);
-        statusText.text = mission.Status;
-        bool preparing = mission.State == LaunchDemo.FlightState.Preparing;
-        fuelButton.interactable = preparing && mission.Fuel < 100f;
-        launchButton.interactable = preparing && mission.Fuel >= 25f;
-        bool counting = mission.State == LaunchDemo.FlightState.Countdown;
-        bool complete = mission.State == LaunchDemo.FlightState.Complete;
-        bool failed = mission.State == LaunchDemo.FlightState.Failed;
-        abortButton.interactable = counting || mission.State == LaunchDemo.FlightState.Flying || mission.State == LaunchDemo.FlightState.Coasting;
-        phaseText.text = preparing ? "01 / PREPARACIÓN" : counting ? "02 / ENCENDIDO" : complete ? "04 / OBJETIVO LOGRADO" : failed ? "VUELO TERMINADO" : "03 / EN VUELO";
-        phaseText.fontSize = complete ? 22 : 26;
-        countdownText.text = counting ? Mathf.CeilToInt(mission.Countdown).ToString("00") : complete ? "MISIÓN\nCUMPLIDA" : failed ? "INTÉNTALO\nDE NUEVO" : "";
-        countdownText.fontSize = counting ? 85 : 48;
-        stageText.text = counting ? "SECUENCIA DE LANZAMIENTO" : complete ? "600 METROS · PRUEBA SUPERADA" : failed ? "CARGA MÁS COMBUSTIBLE Y REINICIA" : "";
-        int seconds = Mathf.FloorToInt(mission.FlightTime);
-        timerText.text = preparing || counting ? "T − 00:" + (counting ? Mathf.CeilToInt(mission.Countdown) : 5).ToString("00") : "T + " + (seconds / 60).ToString("00") + ":" + (seconds % 60).ToString("00");
+        if(view?.Simulation==null) return;
+        var m=view.Simulation; var e=m.Evaluacion; bool prep=m.Fase==Fase.Abordaje && m.Resultado==null, counting=view.State==LaunchDemo.FlightState.Countdown;
+        if(lastMission!=m) { lastMission=m; entrySlider.SetValueWithoutNotify((float)m.AnguloEntrada); bankSlider.SetValueWithoutNotify(0); }
+        design.gameObject.SetActive(prep); flight.gameObject.SetActive(!prep && m.Resultado==null); result.gameObject.SetActive(m.Resultado!=null);
+        site.text=$"{m.Parametros.Clima.ToUpperInvariant()}   /   LAT {m.Parametros.Latitud:F1}°   ·   INC {m.Parametros.Inclinacion:F1}°   ·   AZ {m.Parametros.Azimut:F1}°   /   ROTACIÓN {DinamicaOrbital.Rotacion(m.Datos,m.Parametros.Inclinacion):F0} m/s";
+        status.text=view.Status;
+        Set(material,"ESTRUCTURA  ›  "+m.Nave.MaterialId); Set(fuel,"COMBUSTIBLE  ›  "+m.Nave.CombustibleId.Replace('_','/')); Set(shield,"ESCUDO  ›  "+m.Nave.CapaId);
+        for(int i=0;i<profiles.Length;i++) { profiles[i].interactable=prep && !counting; profiles[i].targetGraphic.color=e.Perfil?.id==i+1?new Color(.12f,.3f,.34f):Surface; }
+        material.interactable=fuel.interactable=shield.interactable=crew.interactable=autonomy.interactable=assist.interactable=prep && !counting;
+        Set(crew,m.Abordados?"4 ASTRONAUTAS A BORDO":"ABORDAR 4 ASTRONAUTAS");
+        Set(autonomy,"AUTONOMÍA: "+m.Parametros.AutonomiaDias+" d  +"); Set(assist,m.Asistencia?"GUÍA: TURISTA":"GUÍA: LABORATORIO");
+        evaluation.text=$"M0 {e.MasaCargada/1000:N1} t   ·   Seca {e.MasaSeca/1000:N1} t\nΔv {e.DeltaV:N0} m/s   ·   TWR {e.Twr:F2}   ·   R {e.RelacionMasa:F2}";
+        budget.text=$"COSTO {e.Costo:N1} / {m.Parametros.Presupuesto:N1} M USD\n"+(e.Viable?"DISEÑO VIABLE · tanques completos":e.Bloqueos.FirstOrDefault()); budget.color=e.Viable?Cyan:Orange;
+        launch.interactable=prep && !counting && e.Viable && m.Abordados && !m.Aplazamiento;
+        Set(launch,counting?"ENCENDIDO EN CURSO":"INICIAR DESPEGUE / ESPACIO");
+        wait.interactable=prep && !counting && m.Parametros.Clima=="Lluvioso"; accept.interactable=prep && !counting && m.Aplazamiento;
+        Set(numberButton,$"MISIÓN {number} · "+(number>=5?"RS-25E +290 M":"RS-25 HEREDADOS"));
+        seedInput.interactable=generate.interactable=numberButton.interactable=(prep && !counting) || m.Resultado!=null;
+        string h=m.Altura>=1000?$"{m.Altura/1000:N1} km":$"{m.Altura:N0} m";
+        telemetry.text=$"<size=27>{h}</size>\nVELOCIDAD   {m.Velocidad:N0} m/s\nMASA   {m.Masa/1000:N2} t\nCARGA   {m.FuerzaG:F2} G / {m.Q/1000:F1} kPa\nCALOR   {m.Calor/1000000:F2} MW/m²\nPROPELENTE   {m.PropelentePorcentaje:F1}%\nMOTORES   {m.Motores}/4 · {m.Throttle*100:F0}%";
+        risk.text=(e.Perfil?.perfil??"COMBINACIÓN NO VIABLE")+"\n\n"+(e.Riesgos.Count>0?string.Join("\n",e.Riesgos):"Sin penalizaciones especiales. Riesgos SRB y motores activos.")+"\n\n"+(m.Asistencia?"Turista: crucero guiado.":"Laboratorio: trayectoria libre.");
+        if(details.gameObject.activeSelf) detailsText.text=(e.Perfil?.perfil??"Configuración no certificada")+"\n"+(e.Perfil?.descripcion??"Selecciona uno de los ocho perfiles para habilitar el lanzamiento.")+"\n\n"+string.Join("\n",e.Bloqueos.Concat(e.Riesgos))+$"\n\nESTRUCTURA {m.Nave.Material.costo_estructura_musd:N1} M · ESCUDO {m.Nave.Capa.costo_musd:N1} M\nPROPELENTES {m.Nave.Combustible.costo_propelentes_musd:N1} M · AJUSTE CORE {m.Nave.Combustible.ajuste_costo_etapa_central_musd:N1} M\nTOTAL {e.Costo:N1} M USD · HARDWARE DESECHABLE\n\n"+string.Join("\n",m.Bitacora.Skip(Math.Max(0,m.Bitacora.Count-9)).Select(x=>x.ToString()));
+        phase.text=((int)m.Fase+1).ToString("00")+" / "+m.Fase.ToString().ToUpperInvariant();
+        flightInfo.text=$"ESCUDO   {m.Capsula.IntegridadEscudo*100:F0}%\nRCS   {m.Capsula.ReservaRcs:F0} m/s disponibles\nAUTONOMÍA   {m.AutonomiaRestante:F1} días\n"+(m.IcpsSeparado?m.Capsula.ServicioSeparado?"CABINA ORIÓN INDEPENDIENTE":"ORIÓN + MÓDULO DE SERVICIO":m.CoreSeparado?"ORIÓN + ICPS":"SLS · ASCENSO POR ETAPAS");
+        ConfigureActions(m);
+        entryText.text=$"ÁNGULO ENTRADA: {m.AnguloEntrada+m.CorreccionEntrada:F1}°  [−6.5°, −5.5°]";
+        bankText.text=$"ALABEO σ: {m.Alabeo:F0}° / "+(m.AutoAlabeo?"AUTOMÁTICO":"MANUAL");
+        entrySlider.interactable=m.Fase==Fase.Recorrido; bankSlider.interactable=m.Fase==Fase.Regreso;
+        if(m.AutoAlabeo) bankSlider.SetValueWithoutNotify((float)m.Alabeo);
+        Set(bankAuto,m.AutoAlabeo?"ALABEO: AUTO":"ALABEO: MANUAL"); Set(chuteAuto,m.AutoParacaidas?"PARACAÍDAS: AUTO":"PARACAÍDAS: MANUAL");
+        energy.interactable=m.Fase==Fase.Recorrido; Set(energy,m.AhorroEnergia?"AHORRO DE ENERGÍA: ACTIVO":"ACTIVAR AHORRO DE ENERGÍA");
+        engineContinue.gameObject.SetActive(m.DecisionMotor); engineAbort.gameObject.SetActive(m.DecisionMotor);
+        Set(pause,m.Pausada?"REANUDAR":"PAUSA"); Set(camera,view.CloseCamera?"VISTA / COHETE":"VISTA / CABINA"); Set(audio,view.Muted?"AUDIO: OFF":"AUDIO: ON");
+        timer.text="T+ "+TimeSpan.FromSeconds(m.Tiempo).ToString(@"dd\:hh\:mm\:ss")+$"   /   TIEMPO ×{view.EffectiveTimeRate:N0}   /   "+(m.Pausada?"PAUSADO":m.DecisionMotor || m.ListaTli || m.ListaReentrada?"ESPERANDO DECISIÓN":"SIMULACIÓN");
+        countdown.text=counting?Mathf.CeilToInt(view.Countdown).ToString("00"):"";
+        if(m.Resultado!=null)
+        {
+            var r=m.Resultado;
+            report.text=(r.Tipo==TipoResultado.Exito?"<color=#59E8E0>TRIPULACIÓN RECUPERADA</color>":r.Tipo==TipoResultado.AbortoSeguro?"ABORTO SEGURO":"<color=#FF7D33>MISIÓN PERDIDA</color>")+"\n\n"+r.Causa+$"\n\nCosto: {e.Costo:N1} M USD\nPérdida: {r.PerdidaMusd:N1} M USD\nMáximos: {m.MaxQ/1000:F1} kPa / {m.MaxG:F2} G";
+            log.text=string.Join("\n\n",m.Bitacora.Skip(Math.Max(0,m.Bitacora.Count-5)).Select(x=>x.ToString()));
+        }
     }
-
-    private static RectTransform Panel(Transform parent, string name, Vector2 anchor, Vector2 position, Vector2 size, Color color)
+    void ConfigureActions(Mision m)
     {
-        var go = new GameObject(name, typeof(RectTransform), typeof(UnityEngine.UI.Image));
-        var rect = go.GetComponent<RectTransform>();
-        rect.SetParent(parent, false); rect.anchorMin = rect.anchorMax = anchor;
-        rect.pivot = anchor; rect.anchoredPosition = position; rect.sizeDelta = size;
-        var image = go.GetComponent<UnityEngine.UI.Image>(); image.color = color; image.raycastTarget = false;
-        return rect;
+        primary.interactable=secondary.interactable=tertiary.interactable=false;
+        if(m.Fase==Fase.Despegue) { Set(primary,m.ListaTli?"CONFIRMAR INYECCIÓN TRANSLUNAR":"ASCENSO AUTOMÁTICO"); primary.interactable=m.ListaTli && !m.DecisionMotor; Set(secondary,"SRB / LAS / CORE: AUTO"); Set(tertiary,"VIGILA MAX-Q Y FUERZA G"); }
+        if(m.Fase==Fase.Recorrido)
+        {
+            Set(primary,m.ListaReentrada?m.Capsula.ServicioSeparado?"INICIAR REINGRESO":"SEPARAR MÓDULO DE SERVICIO":m.IcpsSeparado?"RETORNO LIBRE EN CURSO":"SEPARAR ICPS · T+03:24 H");
+            primary.interactable=m.ListaReentrada || !m.IcpsSeparado && m.Tiempo>=(double)m.Datos.Fisica["motores"]["ICPS_RL10C2"]["t_separacion_s"];
+            Set(secondary,"TCM +8 m/s · ENTRADA +0.1°"); Set(tertiary,"TCM −8 m/s · ENTRADA −0.1°");
+            secondary.interactable=tertiary.interactable=m.Capsula.ReservaRcs>=(double)m.Datos.Juego["correccion_tcm_ms"] && !m.FalloElectrico && !m.Capsula.ServicioSeparado;
+        }
+        if(m.Fase==Fase.Regreso) { Set(primary,"ESCUDO TÉRMICO ACTIVO"); Set(secondary,"MODULA EL ALABEO CON σ"); Set(tertiary,"LÍMITE: 4.5 G"); }
+        if(m.Fase==Fase.Aterrizaje) { Set(primary,m.Principales?"PRINCIPALES DESPLEGADOS":"DESPLEGAR PRINCIPALES <2.9 KM"); primary.interactable=m.Drogues && !m.Principales && m.Altura<=2900; Set(secondary,m.Drogues?"DROGUES DESPLEGADOS":"DESPLEGAR DROGUES <7.3 KM"); secondary.interactable=!m.Drogues && m.Altura<=7300; Set(tertiary,"AMERIZAJE: 7.9–8.2 m/s"); }
     }
-
-    private static TextMeshProUGUI Label(Transform parent, string content, float size, Color color, float x, float y, float width, float height, FontStyles style = FontStyles.Normal)
+    void Primary() { var m=view.Simulation; if(m.ListaTli) m.InyectarTli(); else if(m.ListaReentrada) { if(!m.Capsula.ServicioSeparado) m.SepararServicio(); else m.Reingresar(); } else if(m.Fase==Fase.Recorrido) m.SepararIcps(); else if(m.Fase==Fase.Aterrizaje) m.DesplegarPrincipales(); }
+    void Secondary() { var m=view.Simulation; if(m.Fase==Fase.Recorrido) m.CorregirTrayectoria(1); else if(m.Fase==Fase.Aterrizaje) m.DesplegarDrogues(); }
+    static void Set(UnityEngine.UI.Button b,string text) { b.GetComponentInChildren<TextMeshProUGUI>().text=text; }
+    static RectTransform Panel(Transform parent,string name,Vector2 anchor,Vector2 pos,Vector2 size,Color color)
     {
-        var go = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
-        var rect = go.GetComponent<RectTransform>(); rect.SetParent(parent, false);
-        rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0f, 1f);
-        rect.anchoredPosition = new Vector2(x, -y); rect.sizeDelta = new Vector2(width, height);
-        var label = go.GetComponent<TextMeshProUGUI>();
-        label.text = content; label.fontSize = size; label.color = color; label.fontStyle = style;
-        label.font = TMP_Settings.defaultFontAsset;
-        label.raycastTarget = false; label.textWrappingMode = TextWrappingModes.Normal;
-        label.overflowMode = TextOverflowModes.Overflow;
-        return label;
+        var go=new GameObject(name,typeof(RectTransform),typeof(UnityEngine.UI.Image)); var r=go.GetComponent<RectTransform>(); r.SetParent(parent,false); r.anchorMin=r.anchorMax=r.pivot=anchor; r.anchoredPosition=pos; r.sizeDelta=size;
+        var image=go.GetComponent<UnityEngine.UI.Image>(); image.color=color; image.raycastTarget=false; return r;
     }
-
-    private static UnityEngine.UI.Button Button(Transform parent, string name, string text, float x, float y, float width, float height, Color background, Color foreground, UnityAction action)
+    static TextMeshProUGUI Label(Transform parent,string text,float size,Color color,float x,float y,float w,float h,bool bold=false)
     {
-        var rect = Panel(parent, name, new Vector2(0f, 1f), new Vector2(x, -y), new Vector2(width, height), background);
-        var image = rect.GetComponent<UnityEngine.UI.Image>(); image.raycastTarget = true;
-        var button = rect.gameObject.AddComponent<UnityEngine.UI.Button>(); button.targetGraphic = image;
-        var colors = button.colors; colors.normalColor = Color.white; colors.highlightedColor = new Color(1.15f, 1.15f, 1.15f);
-        colors.pressedColor = new Color(0.7f, 0.85f, 0.9f); colors.disabledColor = new Color(0.4f, 0.45f, 0.48f, 0.65f); button.colors = colors;
-        button.onClick.AddListener(action);
-        var label = Label(rect, text, 16, foreground, 6, 0, width - 12, height, FontStyles.Bold);
-        label.alignment = TextAlignmentOptions.Center;
-        return button;
+        var go=new GameObject("Label",typeof(RectTransform),typeof(TextMeshProUGUI)); var r=go.GetComponent<RectTransform>(); r.SetParent(parent,false); r.anchorMin=r.anchorMax=r.pivot=new Vector2(0,1); r.anchoredPosition=new Vector2(x,-y); r.sizeDelta=new Vector2(w,h);
+        var t=go.GetComponent<TextMeshProUGUI>(); t.text=text; t.font=TMP_Settings.defaultFontAsset; t.fontSize=size; t.color=color; t.fontStyle=bold?FontStyles.Bold:FontStyles.Normal; t.raycastTarget=false; t.textWrappingMode=TextWrappingModes.Normal; t.overflowMode=TextOverflowModes.Ellipsis; return t;
+    }
+    static UnityEngine.UI.Button Button(Transform parent,string name,string text,float x,float y,float w,float h,UnityAction action,bool accent=false,int size=14)
+    {
+        var r=Panel(parent,name,new Vector2(0,1),new Vector2(x,-y),new Vector2(w,h),accent?Orange:Surface); var image=r.GetComponent<UnityEngine.UI.Image>(); image.raycastTarget=true;
+        var b=r.gameObject.AddComponent<UnityEngine.UI.Button>(); b.targetGraphic=image; var c=b.colors; c.normalColor=Color.white; c.highlightedColor=new Color(1.18f,1.18f,1.18f); c.pressedColor=new Color(.7f,.9f,.93f); c.disabledColor=new Color(.55f,.6f,.65f,.7f); b.colors=c;
+        b.onClick.AddListener(action); Label(r,text,size,accent?Ink:Cyan,6,0,w-12,h,true).alignment=TextAlignmentOptions.Center; return b;
+    }
+    static UnityEngine.UI.Slider Slider(Transform parent,string name,float x,float y,float w,float min,float max,float value,UnityAction<float> action)
+    {
+        var r=Panel(parent,name,new Vector2(0,1),new Vector2(x,-y),new Vector2(w,22),Surface); r.GetComponent<UnityEngine.UI.Image>().raycastTarget=true;
+        var area=Panel(r,"Handle area",new Vector2(0,0),new Vector2(9,0),new Vector2(w-18,22),Color.clear);
+        var h=Panel(area,"Handle",new Vector2(0,.5f),Vector2.zero,new Vector2(18,22),Cyan); h.GetComponent<UnityEngine.UI.Image>().raycastTarget=true;
+        var s=r.gameObject.AddComponent<UnityEngine.UI.Slider>(); s.minValue=min; s.maxValue=max; s.value=value; s.handleRect=h; s.targetGraphic=h.GetComponent<UnityEngine.UI.Image>(); s.onValueChanged.AddListener(action); return s;
+    }
+    static TMP_InputField Input(Transform parent,float x,float y,float w,float h,string value)
+    {
+        var r=Panel(parent,"Seed input",new Vector2(0,1),new Vector2(x,-y),new Vector2(w,h),Surface); r.GetComponent<UnityEngine.UI.Image>().raycastTarget=true;
+        var t=Label(r,value,16,Color.white,8,3,w-16,h-6); var f=r.gameObject.AddComponent<TMP_InputField>(); f.textViewport=r; f.textComponent=t; f.contentType=TMP_InputField.ContentType.IntegerNumber; f.characterLimit=10; f.text=value; return f;
     }
 }

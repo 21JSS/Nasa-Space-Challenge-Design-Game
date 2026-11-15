@@ -1,0 +1,13 @@
+{
+  "origen": "Documento: SRB 0.4%; otros valores SUPUESTO configurables",
+  "p_srb": 0.004,
+  "p_motor_segundo": 1e-06,
+  "motores": 4,
+  "consumo_engine_out": 1.05,
+  "p_impacto": 0.015,
+  "p_agrietamiento_maxq": 0.04,
+  "p_electrico": 0.01,
+  "dano_escudo_impacto": 0.25,
+  "dano_escudo_maniobra": 0.1,
+  "perdida_aborto_fraccion": 1.0
+}

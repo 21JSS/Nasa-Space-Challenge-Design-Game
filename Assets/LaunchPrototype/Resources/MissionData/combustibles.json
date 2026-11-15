@@ -1,0 +1,24 @@
+{
+  "LH2_LOX": {
+    "nombre": "LH2 / LOX (Criogénico Alto Rendimiento)",
+    "prop_etapa_central_t": 1003.29,
+    "prop_srb_t": 1260.0,
+    "prop_icps_t": 27.21,
+    "prop_total_t": 2290.5,
+    "factor_isp_etapa_central": 1.0,
+    "costo_propelentes_musd": 3.5,
+    "ajuste_costo_etapa_central_musd": 0.0,
+    "origen_costo": "archivo (propelentes 3.5 M); ajuste 0"
+  },
+  "RP1_LOX": {
+    "nombre": "RP-1 / LOX (Kerolox)",
+    "prop_etapa_central_t": 1171.29,
+    "prop_srb_t": 1260.0,
+    "prop_icps_t": 27.21,
+    "prop_total_t": 2458.5,
+    "factor_isp_etapa_central": 0.8497,
+    "costo_propelentes_musd": 2.0,
+    "ajuste_costo_etapa_central_musd": -110.0,
+    "origen_costo": "supuesto: -10% en etapa central (tanques compactos); factor Isp = 311/366 (RD-180 vs RS-25 a nivel del mar, Fuerza_G.xlsx)"
+  }
+}

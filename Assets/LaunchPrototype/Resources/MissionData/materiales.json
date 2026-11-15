@@ -1,0 +1,57 @@
+{
+  "AlLi2195": {
+    "nombre": "Al-Li 2195 (Baseline SLS)",
+    "factor": 1.0,
+    "precio_usd_t": [
+      15000,
+      28000
+    ],
+    "origen_precio": "archivo",
+    "multiplicador_costo_estructura": 1.0,
+    "costo_estructura_musd": 1326.0
+  },
+  "Acero301": {
+    "nombre": "Acero Inoxidable (301)",
+    "factor": 1.35,
+    "precio_usd_t": [
+      2800,
+      3800
+    ],
+    "origen_precio": "archivo",
+    "multiplicador_costo_estructura": 0.799,
+    "costo_estructura_musd": 1059.5
+  },
+  "Al2024": {
+    "nombre": "Aluminio Estándar (2024)",
+    "factor": 1.15,
+    "precio_usd_t": [
+      3500,
+      6500
+    ],
+    "origen_precio": "proxy: se usó Aluminio 2219 (el 2024 no está en la tabla de precios)",
+    "multiplicador_costo_estructura": 0.839,
+    "costo_estructura_musd": 1112.5
+  },
+  "Ti6Al4V": {
+    "nombre": "Titanio (Ti-6Al-4V)",
+    "factor": 0.85,
+    "precio_usd_t": [
+      45000,
+      77000
+    ],
+    "origen_precio": "archivo",
+    "multiplicador_costo_estructura": 1.133,
+    "costo_estructura_musd": 1502.4
+  },
+  "CFRP": {
+    "nombre": "Fibra de Carbono (CFRP)",
+    "factor": 0.7,
+    "precio_usd_t": [
+      80000,
+      200000
+    ],
+    "origen_precio": "archivo",
+    "multiplicador_costo_estructura": 1.252,
+    "costo_estructura_musd": 1660.2
+  }
+}

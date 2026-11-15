@@ -1,0 +1,73 @@
+{
+  "rango_aleatorio_musd": [
+    3060.0,
+    3876.0
+  ],
+  "base_modelo_musd": 3468.0,
+  "lead_time_meses": 36,
+  "bloques": [
+    {
+      "id": "cohete_sls",
+      "nombre": "Cohete SLS (Propulsión y Estructura)",
+      "min": 1882.0,
+      "max": 2490.0,
+      "base": 2186.0,
+      "pct": 0.63,
+      "detalle": {
+        "etapa_central_boeing": 1100,
+        "rs25_x4": 435,
+        "srb_x2": 425,
+        "icps": 175,
+        "adaptador_lvsa": 51
+      }
+    },
+    {
+      "id": "orion",
+      "nombre": "Nave Orión (sin acoplamiento EEI)",
+      "min": 800.0,
+      "max": 950.0,
+      "base": 875.0,
+      "pct": 0.252,
+      "detalle": {
+        "modulo_tripulacion": 700,
+        "escudo_avcoat": 85,
+        "torre_aborto_las": 90,
+        "modulo_servicio_esm": "aporte socio/trueque"
+      }
+    },
+    {
+      "id": "egs",
+      "nombre": "Operaciones en Tierra (EGS)",
+      "min": 300.0,
+      "max": 350.0,
+      "base": 325.0,
+      "pct": 0.094
+    },
+    {
+      "id": "comunicaciones",
+      "nombre": "Comunicaciones, Control y Rescate",
+      "min": 75.0,
+      "max": 82.0,
+      "base": 78.5,
+      "pct": 0.023
+    },
+    {
+      "id": "propelentes",
+      "nombre": "Propelentes y Gases Criogénicos",
+      "min": 3.0,
+      "max": 4.0,
+      "base": 3.5,
+      "pct": 0.001
+    }
+  ],
+  "regla_rs25": {
+    "misiones_1_a_4": "inventario heredado: 72.5 M/motor = 290 M/vuelo",
+    "mision_5_en_adelante": "RS-25E nuevos: 145 M/motor = 580 M/vuelo (+290 M)"
+  },
+  "exponente_material": 0.12,
+  "estructura_base_musd": 1326,
+  "escudo_base_musd": 85,
+  "combustible_base_musd": 3.5,
+  "recargo_rs25_musd": 290,
+  "primera_mision_rs25": 5
+}

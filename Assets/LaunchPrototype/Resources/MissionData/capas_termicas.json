@@ -1,0 +1,20 @@
+{
+  "Avcoat": {
+    "nombre": "Escudo Ablativo Avcoat",
+    "masa_t": 0.85,
+    "costo_musd": 85.0,
+    "origen_costo": "archivo"
+  },
+  "Losetas": {
+    "nombre": "Losetas Cerámicas (Sílice LI-900)",
+    "masa_t": 0.45,
+    "costo_musd": 103.6,
+    "origen_costo": "derivado: 85 M × (precio_mid_losetas/precio_mid_Avcoat)^0.12"
+  },
+  "Corcho": {
+    "nombre": "Corcho Ablativo Económico",
+    "masa_t": 1.2,
+    "costo_musd": 51.0,
+    "origen_costo": "supuesto: 60% del costo de Avcoat (no hay precio en archivos)"
+  }
+}
