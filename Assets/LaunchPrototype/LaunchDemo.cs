@@ -74,16 +74,21 @@ public sealed partial class LaunchDemo : MonoBehaviour
     private void Update()
     {
 #if ENABLE_INPUT_SYSTEM
-        if (Keyboard.current != null)
+        if (Keyboard.current != null && hud != null)
         {
-            if (UnityEngine.EventSystems.EventSystem.current != null && UnityEngine.EventSystems.EventSystem.current.currentSelectedGameObject != null && UnityEngine.EventSystems.EventSystem.current.currentSelectedGameObject.GetComponent<TMPro.TMP_InputField>() != null) return;
-            if (Keyboard.current.fKey.wasPressedThisFrame) Simulation.Abordar();
-            if (Keyboard.current.spaceKey.wasPressedThisFrame) Launch();
-            if (Keyboard.current.rKey.wasPressedThisFrame) ResetDemo();
+            if (Keyboard.current.escapeKey.wasPressedThisFrame) hud.HandleEscape();
+            // Text focus suppresses shortcuts only: it must never freeze the simulation.
+            if (!hud.BlocksFlightShortcuts)
+            {
+                if (Keyboard.current.fKey.wasPressedThisFrame && State == FlightState.Preparing) Simulation.Abordar();
+                if (Keyboard.current.spaceKey.wasPressedThisFrame) Launch();
+                if (Keyboard.current.rKey.wasPressedThisFrame) ResetDemo();
+                if (Keyboard.current.pKey.wasPressedThisFrame) TogglePause();
+            }
         }
 #endif
         if (rocket == null || exhaustLight == null) return;
-        if (State == FlightState.Countdown)
+        if (State == FlightState.Countdown && !Simulation.Pausada && !WelcomeVisible)
         {
             Countdown = Mathf.Max(0f, Countdown - Time.deltaTime);
             status = Countdown > 2f ? "SECUENCIA AUTOMÁTICA EN CURSO" : "ENCENDIDO DE MOTORES";
@@ -93,7 +98,7 @@ public sealed partial class LaunchDemo : MonoBehaviour
             }
         }
         AdvanceMission(Time.deltaTime);
-        rocket.position = new Vector3(0f, 4.2f + rocketHeight, 0f);
+        UpdateVehiclePose();
         bool firing = State == FlightState.Flying && Simulation.Fase == Artemis.Fase.Despegue && !Simulation.CoreSeparado && Simulation.Resultado == null || (State == FlightState.Countdown && Countdown <= 2f);
         if (enginePlume != null)
         {
@@ -116,18 +121,32 @@ public sealed partial class LaunchDemo : MonoBehaviour
 
     private void UpdateCamera(bool firing)
     {
+        if (WelcomeVisible)
+        {
+            launchCamera.transform.SetPositionAndRotation(new Vector3(0, 5500, -20), Quaternion.identity);
+            launchCamera.backgroundColor = new Color(.002f,.004f,.012f);
+            RenderSettings.fogDensity = 0;
+            UpdateStarVisibility(1f);
+            return;
+        }
         float framing = Mathf.SmoothStep(0f, 1f, rocketHeight / 40f);
         Vector3 target = new Vector3(-1.2f, 7.3f + rocketHeight, 0f);
         Vector3 offset = Vector3.Lerp(new Vector3(11f, 4.8f, -20f), new Vector3(12f, 1.8f, -23f), framing);
         Vector3 shake = firing ? new Vector3(Mathf.PerlinNoise(Time.time * 17f, 0f) - 0.5f, Mathf.PerlinNoise(0f, Time.time * 19f) - 0.5f, 0f) * 0.055f : Vector3.zero;
         if (firstStageSeparated && crewCabin != null) { target = crewCabin.position + Vector3.left * 0.8f; offset = new Vector3(7f, 2.8f, -12f); }
+        if (serviceReleased && crewCabin != null) { target = crewCabin.position + Vector3.left * .6f; offset = new Vector3(4.5f, 2.4f, -9f); }
         if (CloseCamera && crewCabin != null) { target=crewCabin.position; offset=new Vector3(3.4f,1.2f,-5.5f); }
+        if (Simulation.Fase == Artemis.Fase.Aterrizaje && !CloseCamera && crewCabin != null)
+        {
+            target = crewCabin.position + new Vector3(-.6f,1.6f,0);
+            offset = new Vector3(7f,3f,-16f);
+        }
         launchCamera.transform.position = target + offset + shake;
         launchCamera.transform.LookAt(target + shake);
         float spaceBlend = Mathf.SmoothStep(0f, 1f, Altitude / 100000f);
         launchCamera.backgroundColor = Color.Lerp(new Color(0.12f, 0.23f, 0.32f), new Color(0.002f,0.004f,0.012f), spaceBlend);
         RenderSettings.fogDensity = Mathf.Lerp(0.0012f,0f,spaceBlend);
-        UpdateStarVisibility(Mathf.SmoothStep(0f, 1f, (Altitude-18000f) / 82000f));
+        UpdateStarVisibility(Mathf.Lerp(.18f, 1f, Mathf.SmoothStep(0f, 1f, Altitude / 80000f)));
     }
 
     private void BuildWorld()
@@ -191,7 +210,7 @@ public sealed partial class LaunchDemo : MonoBehaviour
 
     private void BuildStars()
     {
-        const int count = 2200;
+        const int count = 4800;
         var random = new System.Random(2026);
         Color[] palette = { new Color(0.72f, 0.84f, 1f), new Color(0.48f, 0.68f, 1f), new Color(1f, 0.86f, 0.68f), Color.white };
         var starObject = new GameObject("High altitude star field");
@@ -239,7 +258,7 @@ public sealed partial class LaunchDemo : MonoBehaviour
             float distance = Mathf.Lerp(2400f, 3200f, (float)random.NextDouble());
             float horizontalDistance = Mathf.Cos(elevation) * distance;
             Vector3 position = new Vector3(Mathf.Sin(angle) * horizontalDistance, Mathf.Sin(elevation) * distance, Mathf.Cos(angle) * horizontalDistance);
-            float size = Mathf.Lerp(1.3f, 4.2f, (float)random.NextDouble());
+            float size = i % 19 == 0 ? 18f : Mathf.Lerp(6f, 12f, (float)random.NextDouble());
             Color color = palette[random.Next(palette.Length)];
             starParticleColors[i] = color;
             starTwinkleOffsets[i] = (float)random.NextDouble() * Mathf.PI * 2f;
@@ -522,7 +541,7 @@ public sealed partial class LaunchDemo : MonoBehaviour
 
     public void Launch()
     {
-        if (State != FlightState.Preparing) return;
+        if (WelcomeVisible || State != FlightState.Preparing) return;
         if (!Simulation.PrepararLanzamiento()) return;
         State = FlightState.Countdown;
         Countdown = 5f;
@@ -546,7 +565,7 @@ public sealed partial class LaunchDemo : MonoBehaviour
         NewMission(Simulation.Parametros.Semilla, Simulation.Parametros.NumeroMision);
         foreach (Transform piece in separatedStages) if (piece != null) Destroy(piece.gameObject);
         separatedStages.Clear();
-        foreach (Mesh mesh in generatedResources.FindAll(resource => resource is Mesh).ConvertAll(resource => (Mesh)resource))
+        foreach (Mesh mesh in generatedResources.FindAll(resource => resource is Mesh && resource != celestialSphere).ConvertAll(resource => (Mesh)resource))
         {
             generatedResources.Remove(mesh);
             if (mesh != null) Destroy(mesh);
@@ -556,6 +575,8 @@ public sealed partial class LaunchDemo : MonoBehaviour
         fuel = 100f; boostersSeparated = firstStageSeparated = false;
         rocketHeight = launchElapsed = Speed = Countdown = 0f;
         State = FlightState.Preparing;
+        SpeedMultiplier = 1f;
+        ResetFlightPresentation();
         padSmoke.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
         engineAudio.volume = 0f;
         BuildRocket();
@@ -975,6 +996,7 @@ public sealed partial class LaunchDemo : MonoBehaviour
         public void Initialize(Vector3 initialVelocity, Vector3 initialSpin, LaunchDemo controller) { velocity = initialVelocity; spin = initialSpin; mission = controller; }
         private void Update()
         {
+            if (mission != null && (mission.WelcomeVisible || mission.Simulation.Pausada)) return;
             float delta = Time.deltaTime * (mission != null ? mission.SpeedMultiplier : 1f);
             velocity += Vector3.down * 2.2f * delta;
             transform.position += velocity * delta;

@@ -10,7 +10,7 @@ using UnityEngine.InputSystem.UI;
 #endif
 
 /// <summary>uGUI traduce entradas a comandos; las reglas permanecen en Artemis.Domain.</summary>
-public sealed class LaunchHud : MonoBehaviour
+public sealed partial class LaunchHud : MonoBehaviour
 {
     static readonly Color Ink=new Color(.025f,.045f,.065f,.97f), Muted=new Color(.64f,.73f,.79f), Cyan=new Color(.35f,.91f,.88f), Orange=new Color(1,.49f,.2f), Surface=new Color(.065f,.115f,.15f);
     LaunchDemo view;
@@ -27,7 +27,9 @@ public sealed class LaunchHud : MonoBehaviour
         view=controller;
         var go=new GameObject("Mission Control",typeof(RectTransform),typeof(Canvas),typeof(UnityEngine.UI.CanvasScaler),typeof(UnityEngine.UI.GraphicRaycaster));
         go.transform.SetParent(transform,false); root=go.GetComponent<RectTransform>(); go.GetComponent<Canvas>().renderMode=RenderMode.ScreenSpaceOverlay;
-        var scaler=go.GetComponent<UnityEngine.UI.CanvasScaler>(); scaler.uiScaleMode=UnityEngine.UI.CanvasScaler.ScaleMode.ScaleWithScreenSize; scaler.referenceResolution=new Vector2(1600,900); scaler.matchWidthOrHeight=.5f;
+        var scaler=go.GetComponent<UnityEngine.UI.CanvasScaler>(); scaler.uiScaleMode=UnityEngine.UI.CanvasScaler.ScaleMode.ScaleWithScreenSize; scaler.referenceResolution=new Vector2(1600,900); scaler.screenMatchMode=UnityEngine.UI.CanvasScaler.ScreenMatchMode.Expand;
+        // Keep every control within a centered safe frame on 16:9, 4:3 and ultrawide screens.
+        root=Panel(go.transform,"Flight safe frame",new Vector2(.5f,.5f),Vector2.zero,new Vector2(1600,900),Color.clear);
         if(FindAnyObjectByType<EventSystem>()==null)
         {
             var events=new GameObject("Launch Event System",typeof(EventSystem)); events.transform.SetParent(transform,false);
@@ -103,11 +105,11 @@ public sealed class LaunchHud : MonoBehaviour
         Button(bottom,"Speed1","×1",787,44,52,34,()=>view.SetSpeedMultiplier(1));
         Button(bottom,"Speed5","×5",847,44,52,34,()=>view.SetSpeedMultiplier(5));
         Button(bottom,"Speed20","×20",907,44,52,34,()=>view.SetSpeedMultiplier(20));
-        pause=Button(bottom,"Pause","PAUSA",980,44,90,34,()=>view.Simulation.Pausar(),false,12);
+        pause=Button(bottom,"Pause","PAUSA",980,44,90,34,view.TogglePause,false,12);
         Button(bottom,"AbortButton","ABORTAR",1088,44,113,34,view.AbortMission);
         timer=Label(bottom,"",13,Muted,787,12,740,21); timer.alignment=TextAlignmentOptions.Right;
         Button(bottom,"Reset","REINICIAR / R",1220,44,154,34,view.ResetDemo);
-        Button(bottom,"QuickBoard","ABORDAR / F",1386,44,138,34,()=>view.Simulation.Abordar(),false,11);
+        Button(bottom,"WelcomeMenu","MENÚ / ESC",1386,44,138,34,view.ShowWelcome,false,11);
         countdown=Label(root,"",75,Color.white,600,260,480,140,true); countdown.alignment=TextAlignmentOptions.Center;
         details=Panel(root,"Mission details",new Vector2(.5f,.5f),Vector2.zero,new Vector2(820,670),Ink);
         details.GetComponent<UnityEngine.UI.Image>().raycastTarget=true;
@@ -115,6 +117,8 @@ public sealed class LaunchHud : MonoBehaviour
         Button(details,"CloseDetails","CERRAR",674,20,118,38,()=>details.gameObject.SetActive(false));
         detailsText=Label(details,"",16,Color.white,28,82,764,560);
         details.gameObject.SetActive(false);
+        BuildWelcome(go.transform);
+        ShowWelcome(true);
     }
     void Update()
     {
@@ -131,7 +135,8 @@ public sealed class LaunchHud : MonoBehaviour
         Set(autonomy,"AUTONOMÍA: "+m.Parametros.AutonomiaDias+" d  +"); Set(assist,m.Asistencia?"GUÍA: TURISTA":"GUÍA: LABORATORIO");
         evaluation.text=$"M0 {e.MasaCargada/1000:N1} t   ·   Seca {e.MasaSeca/1000:N1} t\nΔv {e.DeltaV:N0} m/s   ·   TWR {e.Twr:F2}   ·   R {e.RelacionMasa:F2}";
         budget.text=$"COSTO {e.Costo:N1} / {m.Parametros.Presupuesto:N1} M USD\n"+(e.Viable?"DISEÑO VIABLE · tanques completos":e.Bloqueos.FirstOrDefault()); budget.color=e.Viable?Cyan:Orange;
-        launch.interactable=prep && !counting && e.Viable && m.Abordados && !m.Aplazamiento;
+        // Let the command explain missing crew/budget/weather instead of silently locking the button.
+        launch.interactable=prep && !counting;
         Set(launch,counting?"ENCENDIDO EN CURSO":"INICIAR DESPEGUE / ESPACIO");
         wait.interactable=prep && !counting && m.Parametros.Clima=="Lluvioso"; accept.interactable=prep && !counting && m.Aplazamiento;
         Set(numberButton,$"MISIÓN {number} · "+(number>=5?"RS-25E +290 M":"RS-25 HEREDADOS"));
@@ -143,9 +148,13 @@ public sealed class LaunchHud : MonoBehaviour
         phase.text=((int)m.Fase+1).ToString("00")+" / "+m.Fase.ToString().ToUpperInvariant();
         flightInfo.text=$"ESCUDO   {m.Capsula.IntegridadEscudo*100:F0}%\nRCS   {m.Capsula.ReservaRcs:F0} m/s disponibles\nAUTONOMÍA   {m.AutonomiaRestante:F1} días\n"+(m.IcpsSeparado?m.Capsula.ServicioSeparado?"CABINA ORIÓN INDEPENDIENTE":"ORIÓN + MÓDULO DE SERVICIO":m.CoreSeparado?"ORIÓN + ICPS":"SLS · ASCENSO POR ETAPAS");
         ConfigureActions(m);
-        entryText.text=$"ÁNGULO ENTRADA: {m.AnguloEntrada+m.CorreccionEntrada:F1}°  [−6.5°, −5.5°]";
+        entryText.text=m.Fase==Fase.Regreso || m.Fase==Fase.Aterrizaje
+            ? $"TRAYECTORIA ACTUAL: {view.VisualFlightAngle:F1}° · HORIZONTE"
+            : $"ÁNGULO ENTRADA: {m.AnguloEntrada+m.CorreccionEntrada:F1}°  [−6.5°, −5.5°]";
         bankText.text=$"ALABEO σ: {m.Alabeo:F0}° / "+(m.AutoAlabeo?"AUTOMÁTICO":"MANUAL");
         entrySlider.interactable=m.Fase==Fase.Recorrido; bankSlider.interactable=m.Fase==Fase.Regreso;
+        bankAuto.interactable=m.Resultado==null && (m.Fase==Fase.Recorrido || m.Fase==Fase.Regreso);
+        chuteAuto.interactable=m.Resultado==null;
         if(m.AutoAlabeo) bankSlider.SetValueWithoutNotify((float)m.Alabeo);
         Set(bankAuto,m.AutoAlabeo?"ALABEO: AUTO":"ALABEO: MANUAL"); Set(chuteAuto,m.AutoParacaidas?"PARACAÍDAS: AUTO":"PARACAÍDAS: MANUAL");
         energy.interactable=m.Fase==Fase.Recorrido; Set(energy,m.AhorroEnergia?"AHORRO DE ENERGÍA: ACTIVO":"ACTIVAR AHORRO DE ENERGÍA");
@@ -153,6 +162,8 @@ public sealed class LaunchHud : MonoBehaviour
         Set(pause,m.Pausada?"REANUDAR":"PAUSA"); Set(camera,view.CloseCamera?"VISTA / COHETE":"VISTA / CABINA"); Set(audio,view.Muted?"AUDIO: OFF":"AUDIO: ON");
         timer.text="T+ "+TimeSpan.FromSeconds(m.Tiempo).ToString(@"dd\:hh\:mm\:ss")+$"   /   TIEMPO ×{view.EffectiveTimeRate:N0}   /   "+(m.Pausada?"PAUSADO":m.DecisionMotor || m.ListaTli || m.ListaReentrada?"ESPERANDO DECISIÓN":"SIMULACIÓN");
         countdown.text=counting?Mathf.CeilToInt(view.Countdown).ToString("00"):"";
+        if(m.Pausada && !view.WelcomeVisible) status.text="EN PAUSA · Pulsa REANUDAR o P para continuar. Los ajustes siguen disponibles.";
+        UpdateWelcome();
         if(m.Resultado!=null)
         {
             var r=m.Resultado;
@@ -185,7 +196,7 @@ public sealed class LaunchHud : MonoBehaviour
     static TextMeshProUGUI Label(Transform parent,string text,float size,Color color,float x,float y,float w,float h,bool bold=false)
     {
         var go=new GameObject("Label",typeof(RectTransform),typeof(TextMeshProUGUI)); var r=go.GetComponent<RectTransform>(); r.SetParent(parent,false); r.anchorMin=r.anchorMax=r.pivot=new Vector2(0,1); r.anchoredPosition=new Vector2(x,-y); r.sizeDelta=new Vector2(w,h);
-        var t=go.GetComponent<TextMeshProUGUI>(); t.text=text; t.font=TMP_Settings.defaultFontAsset; t.fontSize=size; t.color=color; t.fontStyle=bold?FontStyles.Bold:FontStyles.Normal; t.raycastTarget=false; t.textWrappingMode=TextWrappingModes.Normal; t.overflowMode=TextOverflowModes.Ellipsis; return t;
+        var t=go.GetComponent<TextMeshProUGUI>(); t.text=text; t.font=TMP_Settings.defaultFontAsset; t.fontSize=size; t.color=color; t.fontStyle=bold?FontStyles.Bold:FontStyles.Normal; t.raycastTarget=false; t.textWrappingMode=TextWrappingModes.Normal; t.overflowMode=TextOverflowModes.Truncate; return t;
     }
     static UnityEngine.UI.Button Button(Transform parent,string name,string text,float x,float y,float w,float h,UnityAction action,bool accent=false,int size=14)
     {

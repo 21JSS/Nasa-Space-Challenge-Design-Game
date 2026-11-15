@@ -45,7 +45,7 @@ Shader "Aurora/Stars"
             fixed4 frag(Varyings input) : SV_Target
             {
                 fixed4 star = tex2D(_MainTex, input.uv);
-                return fixed4(star.rgb * input.color.rgb, star.a * input.color.a);
+                return fixed4(star.rgb * input.color.rgb * 2, star.a * input.color.a);
             }
             ENDCG
         }

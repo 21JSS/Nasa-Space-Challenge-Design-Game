@@ -62,7 +62,7 @@ public sealed partial class LaunchDemo
         var m=Simulation;
         string rate=m.Fase==Fase.Recorrido?"velocidad_tiempo_crucero":m.Fase==Fase.Regreso?"velocidad_tiempo_reingreso":m.Fase==Fase.Aterrizaje?"velocidad_tiempo_descenso":"velocidad_tiempo_ascenso";
         EffectiveTimeRate=(float)m.Datos.Juego[rate]*SpeedMultiplier;
-        if(State!=FlightState.Preparing && State!=FlightState.Countdown) m.Avanzar(Mathf.Min(dt,0.1f)*EffectiveTimeRate);
+        if(!WelcomeVisible && State!=FlightState.Preparing && State!=FlightState.Countdown) m.Avanzar(Mathf.Min(dt,0.1f)*EffectiveTimeRate);
         fuel=(float)m.PropelentePorcentaje; Speed=(float)m.Velocidad; launchElapsed=(float)m.Tiempo;
         // Escala visual comprimida y continua; las magnitudes del HUD siempre conservan SI.
         rocketHeight=(float)(300*Math.Log10(1+m.Altura/2000));
@@ -95,13 +95,14 @@ public sealed partial class LaunchDemo
         icpsModule=parts[0]; serviceModule=parts[1]; crewCabin=parts[2];
         // Pivote de seguimiento en el centro geométrico, manteniendo intacta la malla recortada.
         crewCabin=PivotAtBounds(crewCabin,"Orion crew cabin");
+        BuildCabinShell();
         icpsModule=PivotAtBounds(icpsModule,"ICPS separation pivot");
         serviceModule=PivotAtBounds(serviceModule,"Service separation pivot");
         lasTower=Part(rocket,"Launch abort tower",PrimitiveType.Cylinder,new Vector3(0,6.27f,0),new Vector3(0.055f,0.27f,0.055f),new Color(0.82f,0.86f,0.9f)).transform;
         Part(lasTower,"LAS tip",PrimitiveType.Sphere,new Vector3(0,1,0),new Vector3(1.5f,0.1f,1.5f),Cyan,true);
-        var window=Part(crewCabin,"Crew observation window",PrimitiveType.Sphere,Vector3.zero,new Vector3(0.35f,0.18f,0.06f),new Color(0.05f,0.34f,0.53f),true);
+        var window=Part(crewCabin,"Crew observation window",PrimitiveType.Sphere,Vector3.zero,new Vector3(0.17f,0.11f,0.025f),new Color(0.025f,0.15f,0.24f));
         // El pivote está en unidades de mundo para que accesorios no hereden la escala FBX ×100.
-        window.transform.localPosition=new Vector3(0,0,-0.32f);
+        window.transform.localPosition=new Vector3(0,.06f,-.215f);
         reentryGlow=Part(crewCabin,"Heat shield plasma",PrimitiveType.Sphere,new Vector3(0,-0.30f,0),new Vector3(0.7f,0.08f,0.7f),new Color(1,0.18f,0.025f),true);
         reentryGlow.SetActive(false);
         var shield=Part(crewCabin,"Orion heat shield",PrimitiveType.Cylinder,new Vector3(0,-0.32f,0),new Vector3(0.63f,0.045f,0.63f),new Color(0.1f,0.09f,0.09f));
@@ -121,28 +122,7 @@ public sealed partial class LaunchDemo
     void BuildMissionScenery()
     {
         earthRenderer=transform.Find("Earth horizon").GetComponent<Renderer>();
-        var tex=new Texture2D(1024,512,TextureFormat.RGBA32,true) { name="Earth oceans, continents and clouds",wrapMode=TextureWrapMode.Repeat };
-        var pixels=new Color[1024*512];
-        for(int y=0;y<512;y++) for(int x=0;x<1024;x++)
-        {
-            float u=x/1024f,v=y/512f;
-            float a=Mathf.PerlinNoise(u*8.5f+32,v*5.5f+11)+0.35f*Mathf.PerlinNoise(u*22,v*19);
-            Color col=a>0.77f ? Color.Lerp(new Color(0.09f,0.21f,0.11f),new Color(0.53f,0.43f,0.27f),Mathf.InverseLerp(0.77f,1.25f,a)) : Color.Lerp(new Color(0.015f,0.045f,0.13f),new Color(0.015f,0.22f,0.38f),Mathf.InverseLerp(0.3f,0.77f,a));
-            float cloud=Mathf.SmoothStep(0,1,Mathf.InverseLerp(0.62f,0.86f,Mathf.PerlinNoise(u*30+Mathf.Sin(v*15)*2,v*14)))*0.7f;
-            col=Color.Lerp(col,new Color(0.82f,0.9f,0.96f),cloud);
-            if(v<0.06f || v>0.94f) col=Color.Lerp(col,new Color(0.8f,0.9f,0.95f),0.8f);
-            pixels[y*1024+x]=col;
-        }
-        tex.SetPixels(pixels); tex.Apply(); generatedResources.Add(tex);
-        var material=new Material(Shader.Find("Universal Render Pipeline/Lit")); material.SetTexture("_BaseMap",tex); material.SetFloat("_Smoothness",0.3f);
-        material.EnableKeyword("_EMISSION"); material.SetTexture("_EmissionMap",tex); material.SetColor("_EmissionColor",new Color(0.18f,0.25f,0.4f));
-        generatedResources.Add(material); earthRenderer.sharedMaterial=material;
-        moon=Make("Lunar destination",PrimitiveType.Sphere,new Vector3(300,1200,1000),Vector3.one*95,new Color(0.56f,0.59f,0.63f));
-        var moonTexture=new Texture2D(256,128,TextureFormat.RGBA32,true);
-        var moonPixels=new Color[256*128];
-        for(int y=0;y<128;y++) for(int x=0;x<256;x++) { float n=Mathf.PerlinNoise(x*0.14f,y*0.14f)*0.3f+Mathf.PerlinNoise(x*0.035f,y*0.035f)*0.6f; moonPixels[y*256+x]=Color.Lerp(new Color(0.14f,0.17f,0.22f),new Color(0.82f,0.81f,0.76f),n); }
-        moonTexture.SetPixels(moonPixels); moonTexture.Apply(); generatedResources.Add(moonTexture);
-        var moonMat=new Material(material); moonMat.SetTexture("_BaseMap",moonTexture); moonMat.SetTexture("_EmissionMap",moonTexture); generatedResources.Add(moonMat); moon.GetComponent<Renderer>().sharedMaterial=moonMat;
+        BuildCelestialBodies();
         fillLight=new GameObject("Earth reflected blue light").AddComponent<Light>(); fillLight.transform.SetParent(transform,false);
         fillLight.type=LightType.Directional; fillLight.color=new Color(0.33f,0.57f,1f); fillLight.intensity=0.65f; fillLight.transform.rotation=Quaternion.Euler(-25,145,0);
         ocean=Make("Pacific splashdown",PrimitiveType.Plane,new Vector3(0,3.8f,0),new Vector3(80,1,80),new Color(0.02f,0.19f,0.29f)); ocean.SetActive(false);
@@ -151,17 +131,30 @@ public sealed partial class LaunchDemo
     {
         if(Simulation==null) return;
         bool descent=Simulation.Fase==Fase.Aterrizaje;
-        if(ocean!=null) ocean.SetActive(descent);
+        if(ocean!=null)
+        {
+            ocean.SetActive(descent && !WelcomeVisible);
+            ocean.transform.position=new Vector3(rocket.position.x,4.2f+crewCabin.localPosition.y-.33f,0);
+        }
         if(earthRenderer!=null)
         {
             bool orbit=Simulation.Altura>80000;
-            earthRenderer.transform.position=orbit?launchCamera.transform.position+launchCamera.transform.forward*2100-launchCamera.transform.up*1600:new Vector3(0,-2500,0);
-            earthRenderer.transform.localScale=Vector3.one*(orbit?3000:5000);
+            bool entering=Simulation.Fase==Fase.Regreso;
+            earthRenderer.gameObject.SetActive(orbit || entering || WelcomeVisible);
+            float approach=entering?1-Mathf.Clamp01(Altitude/120000f):0;
+            earthRenderer.transform.position=WelcomeVisible
+                ? launchCamera.transform.position+launchCamera.transform.forward*2400+launchCamera.transform.right*750
+                : launchCamera.transform.position+launchCamera.transform.forward*2100-launchCamera.transform.up*(1600-approach*450)
+                    -launchCamera.transform.right*(entering?Mathf.Clamp(downrange*.015f,0,350):0);
+            earthRenderer.transform.localScale=Vector3.one*(WelcomeVisible?1300:3000);
+            if(WelcomeVisible || !Simulation.Pausada && Simulation.Resultado==null)
+                earthRenderer.transform.Rotate(Vector3.up,Time.deltaTime*.65f,Space.Self);
         }
         if(moon!=null)
         {
-            moon.SetActive(Simulation.Altura>80000);
-            moon.transform.position=launchCamera.transform.position+launchCamera.transform.forward*1400+launchCamera.transform.right*340+launchCamera.transform.up*150;
+            moon.SetActive(Simulation.Altura>80000 || WelcomeVisible);
+            moon.transform.position=launchCamera.transform.position+launchCamera.transform.forward*1500+launchCamera.transform.right*(WelcomeVisible?630:340)+launchCamera.transform.up*(WelcomeVisible?370:200);
+            moon.transform.localScale=Vector3.one*(WelcomeVisible?180:145);
         }
         if(reentryGlow!=null)
         {
@@ -169,11 +162,11 @@ public sealed partial class LaunchDemo
             reentryGlow.transform.localScale=new Vector3(0.8f,0.12f+Mathf.PingPong(Time.time*0.4f,0.12f),0.8f);
         }
         if((Simulation.Drogues || Simulation.Principales) && parachutes==null) BuildParachutes();
-        if(parachutes!=null) parachutes.transform.localScale=Vector3.one*(Simulation.Principales?1f:0.35f);
     }
     void BuildParachutes()
     {
         parachutes=new GameObject("Orion recovery parachutes"); parachutes.transform.SetParent(crewCabin,false);
+        parachutes.transform.localScale=Vector3.one*.02f;
         for(int i=0;i<3;i++)
         {
             Vector3 center=new Vector3((i-1)*1.5f,3.6f+(i%2)*0.5f,0.1f);
